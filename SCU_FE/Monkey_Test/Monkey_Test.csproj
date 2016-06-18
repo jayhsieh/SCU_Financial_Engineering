@@ -72,6 +72,10 @@
     </BootstrapperPackage>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Simulation\Simulation.csproj">
+      <Project>{934a9557-5164-44da-a2c0-a73efbec6ff7}</Project>
+      <Name>Simulation</Name>
+    </ProjectReference>
     <ProjectReference Include="..\Utility\Utility.csproj">
       <Project>{dd477d55-eb86-42f4-8ede-2906a458e3fd}</Project>
       <Name>Utility</Name>
