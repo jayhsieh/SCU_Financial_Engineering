@@ -5,6 +5,9 @@ using System.Text;
 
 namespace Utility
 {
+    /// <summary>
+    /// http://www.iro.umontreal.ca/~panneton/WELLRNG.html
+    /// </summary>
     public class RandomWELL {
         private const int N = 16;
         private const uint M0 = 0x3F800000U;
@@ -36,7 +39,7 @@ namespace Utility
             }
         }
         /// <summary>
-        /// Upper closed and lower opened Interval
+        /// Upper closed 1 and lower opened 0 interval
         /// </summary>
         /// <returns>(0.0 1.0]</returns>
         public double frand() {
@@ -49,7 +52,7 @@ namespace Utility
             return System.BitConverter.ToSingle(bytes_, 0) - 0.999999881f;
         }
         /// <summary>
-        /// Upper opened and lower closed Interval
+        /// Upper opened 1 and lower closed 0 interval
         /// </summary>
         /// <returns>[0.0 1.0)</returns>
         public double frand2() {
@@ -100,6 +103,45 @@ namespace Utility
         /// <returns></returns>
         public int Range(int min, int max) {
             return (int)((min - max) * frand2() + min);
+        }
+    }
+    /// <summary>
+    /// 
+    /// </summary>
+    public class Normal01{
+        /// <summary>
+        /// Marsaglia polar method
+        /// </summary>
+        /// <returns>Normal random generator</returns>
+        public double NextGaussianDouble() {  
+            double u, v, S;
+            Random rnd = new Random(Guid.NewGuid().GetHashCode());
+            do {
+                u = 2.0 * rnd.NextDouble() - 1.0;
+                v = 2.0 * rnd.NextDouble() - 1.0;
+                S = u * u + v * v;
+            }
+            while (S >= 1.0 || S==0);
+            
+            double fac = Math.Sqrt(-2.0 * Math.Log(S) / S);
+            return u * fac;
+        }
+        /// <summary>
+        /// Box-Muller transform
+        /// </summary> https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
+        /// <returns>Normal random generator</returns>
+        public double NextGaussianDouble_Box_Muller() {
+            const double Pi = 3.1415926;
+            double u1, u2, R, theta, x1, x2;
+            Random rnd = new Random(Guid.NewGuid().GetHashCode());
+            u1 = rnd.NextDouble();
+            u2 = rnd.NextDouble();
+            R = Math.Sqrt(-2 * Math.Log(u1));
+            theta = 2 * Pi * u2;
+            x1 = R * Math.Cos(theta);
+            x2 = R * Math.Sin(theta);
+
+            return x1;
         }
     }
 }
