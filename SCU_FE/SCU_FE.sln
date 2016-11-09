@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Monkey_Test", "Monkey_Test\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Simulation", "Simulation\Simulation.csproj", "{934A9557-5164-44DA-A2C0-A73EFBEC6FF7}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FPSO", "FPSO\FPSO.vcxproj", "{1F2D0991-071E-4F0F-B410-24B985735C58}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -49,6 +51,16 @@ Global
 		{934A9557-5164-44DA-A2C0-A73EFBEC6FF7}.Release|Mixed Platforms.ActiveCfg = Release|Any CPU
 		{934A9557-5164-44DA-A2C0-A73EFBEC6FF7}.Release|Mixed Platforms.Build.0 = Release|Any CPU
 		{934A9557-5164-44DA-A2C0-A73EFBEC6FF7}.Release|Win32.ActiveCfg = Release|Any CPU
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Debug|Any CPU.ActiveCfg = Debug|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Debug|Mixed Platforms.ActiveCfg = Debug|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Debug|Mixed Platforms.Build.0 = Debug|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Debug|Win32.ActiveCfg = Debug|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Debug|Win32.Build.0 = Debug|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Release|Any CPU.ActiveCfg = Release|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Release|Mixed Platforms.ActiveCfg = Release|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Release|Mixed Platforms.Build.0 = Release|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Release|Win32.ActiveCfg = Release|Win32
+		{1F2D0991-071E-4F0F-B410-24B985735C58}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
