@@ -1,0 +1,460 @@
+Option Explicit
+
+Public Sub generateTermsheet(Prod As Object, temp As Integer)
+    Dim wrdfpath As String, wrdfname As String, tsSpec As String, ss As String
+    Dim wrdApp As Object, wrdDoc As Object
+    Dim wsTermsheetSpec As Worksheet
+    Dim i As Long, j As Long, k As Integer
+        
+    tsFullfname = ThisWorkbook.Path & "\TS_DONE\" & getTSName(Prod)
+    wrdfpath = ThisWorkbook.Path & "\TS_TMP"
+    wrdfname = "TMP_" & Replace(Prod.Item("strategy"), " ", "") & "_" & VBA.UCase(Prod.Item("entity")) & ".doc"
+    Set wrdApp = CreateObject("Word.Application")
+    
+    'for test purpose
+    'wrdApp.Visible = True
+    
+    Set wrdDoc = wrdApp.Documents.Open(wrdfpath & "\" & wrdfname)
+    
+    If Prod.Item("strategy") = "AKOFWD" Then
+        Set wsTermsheetSpec = ThisWorkbook.Sheets("ts_akofwd")
+    ElseIf Prod.Item("strategy") = "AKOEKI OPT" Then
+        Set wsTermsheetSpec = ThisWorkbook.Sheets("ts_akoeki_opt")
+    ElseIf Prod.Item("strategy") = "EKOFWD" Then
+        Set wsTermsheetSpec = ThisWorkbook.Sheets("ts_ekofwd")
+    Else
+        Set wsTermsheetSpec = Nothing
+    End If
+
+    i = 1
+    Do While wsTermsheetSpec.Cells(i, 1).Value <> ""
+        For j = 1 To 2
+            tsSpec = wsTermsheetSpec.Cells(i, j).Value
+        
+            ' --- Common fields
+            If tsSpec = "tsTradeDate" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsTradeDate(Prod, "cht") & vbCr & tsTradeDate(Prod, "eng")
+            ElseIf tsSpec = "tsTFCB" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsTFCB(Prod, "cht") & vbCr & tsTFCB(Prod, "eng")
+            ElseIf tsSpec = "tsCNPT" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsCNPT(Prod, "cht")
+            ElseIf tsSpec = "tsNom" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsNom(Prod, "cht") & vbCr & tsNom(Prod, "eng")
+            ElseIf tsSpec = "tsPrem" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsPrem(Prod, "cht") & vbCr & tsPrem(Prod, "eng")
+            ElseIf tsSpec = "tsExpDate" Then
+                ss = tsExpDate(Prod, "cht", temp, 1) & " / " & tsExpDate(Prod, "eng", temp, 1)
+                If temp > 1 Then
+                    For k = 2 To temp
+                        ss = ss & vbCr & tsExpDate(Prod, "cht", temp, k) & " / " & tsExpDate(Prod, "eng", temp, k)
+                    Next k
+                End If
+                wrdDoc.Tables(1).Cell(i, j) = ss
+            ElseIf tsSpec = "tsDelDate" Then
+                ss = tsDelDate(Prod, "cht", temp, 1) & " / " & tsDelDate(Prod, "eng", temp, 1)
+                If temp > 1 Then
+                    For k = 2 To temp
+                        ss = ss & vbCr & tsDelDate(Prod, "cht", temp, k) & " / " & tsDelDate(Prod, "eng", temp, k)
+                    Next k
+                End If
+                wrdDoc.Tables(1).Cell(i, j) = ss
+            ElseIf tsSpec = "tsINST" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsINST(Prod, "cht") & vbCr & tsINST(Prod, "eng")
+            ElseIf tsSpec = "tsFixPage" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsFixPage(Prod)
+            ElseIf tsSpec = "tsSettle" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsSettle(Prod, "cht") & vbCr & tsSettle(Prod, "eng")
+            ElseIf tsSpec = "tsFixConv" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsFixConv(Prod, "cht") & vbCr & tsFixConv(Prod, "eng")
+            ElseIf tsSpec = "tsDelConv" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsDelConv(Prod, "cht") & vbCr & tsDelConv(Prod, "eng")
+            ' --- By Strategy - AKOFWD
+            ElseIf tsSpec = "tsK" And Prod.Item("strategy") = "AKOFWD" Then
+                wrdDoc.Tables(1).Cell(i, j) = Format(Prod.Item("stg_strike"), "General Number")
+            ElseIf tsSpec = "tsAKO" And Prod.Item("strategy") = "AKOFWD" Then
+                wrdDoc.Tables(1).Cell(i, j) = Format(Prod.Item("bar0"), "General Number")
+            ElseIf tsSpec = "tsBarType" And Prod.Item("strategy") = "AKOFWD" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsBarType(Prod)
+            ElseIf tsSpec = "tsPayoff" And Prod.Item("strategy") = "AKOFWD" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsPayoff(Prod)
+            ' --- By Strategy - AKOEKI OPT
+            ElseIf tsSpec = "tsK" And Prod.Item("strategy") = "AKOEKI OPT" Then
+                wrdDoc.Tables(1).Cell(i, j) = Format(Prod.Item("stg_strike"), "General Number")
+            ElseIf tsSpec = "tsEKI" And Prod.Item("strategy") = "AKOEKI OPT" Then
+                wrdDoc.Tables(1).Cell(i, j) = Format(Prod.Item("stg_eki"), "General Number")
+            ElseIf tsSpec = "tsAKO" And Prod.Item("strategy") = "AKOEKI OPT" Then
+                wrdDoc.Tables(1).Cell(i, j) = Format(Prod.Item("bar0"), "General Number")
+            ElseIf tsSpec = "tsEBarType" And Prod.Item("strategy") = "AKOEKI OPT" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsEBarType(Prod)
+            ElseIf tsSpec = "tsBarType" And Prod.Item("strategy") = "AKOEKI OPT" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsBarType(Prod)
+            ElseIf tsSpec = "tsPayoff" And Prod.Item("strategy") = "AKOEKI OPT" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsPayoff(Prod)
+            ' --- By Strategy - EKOFWD
+            ElseIf tsSpec = "tsK" And Prod.Item("strategy") = "EKOFWD" Then
+                wrdDoc.Tables(1).Cell(i, j) = Format(Prod.Item("stg_strike"), "General Number")
+            ElseIf tsSpec = "tsEKO" And Prod.Item("strategy") = "EKOFWD" Then
+                wrdDoc.Tables(1).Cell(i, j) = Format(Prod.Item("bar0"), "General Number")
+            ElseIf tsSpec = "tsBarType" And Prod.Item("strategy") = "EKOFWD" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsBarType(Prod)
+            ElseIf tsSpec = "tsPayoff" And Prod.Item("strategy") = "EKOFWD" Then
+                wrdDoc.Tables(1).Cell(i, j) = tsPayoff(Prod)
+
+            Else
+                wrdDoc.Tables(1).Cell(i, j) = tsSpec
+            End If
+        Next j
+        i = i + 1
+    Loop
+    
+    tsFullfname = tsFullfname & Prod.Item("pck")
+    
+    If VBA.CDbl(wrdApp.Version) >= 12# Then Call Confirm.PrintPDF(wrdDoc, tsFullfname)
+
+    'Office 2003
+    wrdDoc.SaveAs tsFullfname & ".doc"
+    wrdDoc.Close    'close the document
+    wrdApp.Quit     'close Word
+    Set wrdDoc = Nothing
+    Set wrdApp = Nothing
+End Sub
+
+Private Function getTSName(Prod As Object) As String
+    Dim tmpCP As String
+    
+    If Prod.Item("call_put") = "P" Then
+        tmpCP = "Put"
+    Else
+        tmpCP = "Call"
+    End If
+    
+    If Prod.Item("strategy") = "AKOFWD" Or Prod.Item("strategy") = "EKOFWD" Then    'TODO
+        getTSName = Prod.Item("trade_date") & "_" & Prod.Item("strategy") & "_" & Prod.Item("abbr") & "_" & Prod.Item("stg_buysell") & "_" & Prod.Item("inst") & "_" & Prod.Item("link_nb")
+    ElseIf Prod.Item("strategy") = "AKOEKI OPT" Then
+        getTSName = Prod.Item("trade_date") & "_AKOEKI_" & Prod.Item("abbr") & "_" & Prod.Item("stg_buysell") & "_" & tmpCP & "_" & Prod.Item("inst") & "_" & Prod.Item("link_nb")
+    ElseIf Prod.Item("strategy") = "AKOEKI FWD" Then
+    End If
+End Function
+
+Private Function tsPayoff(Prod As Object)
+    Dim strPF As String, ClientBuySell As String, settlement As String, payout_ccy As String, inst As String, strCCY As String
+    Dim icol As Integer
+    
+    ClientBuySell = Prod.Item("stg_buysell")
+    settlement = Prod.Item("settlement")
+    payout_ccy = Prod.Item("payout_ccy")
+    inst = Prod.Item("inst")
+
+    If Prod.Item("strategy") = "AKOFWD" Or Prod.Item("strategy") = "EKOFWD" Then    'TODO
+        Dim tsLeverage As Double: tsLeverage = VBA.CDbl(Prod.Item("stg_nom2")) / VBA.CDbl(Prod.Item("stg_nom1"))
+        
+        If Prod.Item("strategy") = "EKOFWD" Then
+            icol = 12
+        Else
+            icol = 3
+        End If
+        
+        Select Case settlement
+        Case "1", "3", "4"
+            If ClientBuySell = "Buy" Then
+                strPF = ts_payoff.Cells(2, icol).Value
+            Else
+                strPF = ts_payoff.Cells(5, icol).Value
+            End If
+            strPF = Replace(strPF, "_tsLeverage_", tsLeverage)
+        Case "0", "2"
+            If payout_ccy = VBA.Left(inst, 3) Then
+                If ClientBuySell = "Buy" Then
+                    strPF = ts_payoff.Cells(3, icol).Value
+                Else
+                    strPF = ts_payoff.Cells(6, icol).Value
+                End If
+            Else
+                If ClientBuySell = "Buy" Then
+                    strPF = ts_payoff.Cells(4, icol).Value
+                Else
+                    strPF = ts_payoff.Cells(7, icol).Value
+                End If
+            End If
+    
+            strPF = Replace(strPF, "_tsLeverage_", tsLeverage)
+            strPF = Replace(strPF, "_tsSettle_cht_", tsCCY(payout_ccy, "cht"))
+            strPF = Replace(strPF, "_tsSettle_eng_", tsCCY(payout_ccy, "eng"))
+        End Select
+
+    ElseIf Prod.Item("strategy") = "AKOEKI OPT" Then
+        Dim tsTMP As String
+        
+        tsTMP = Prod.Item("call_put")
+        Select Case settlement
+        Case "1", "3", "4"
+            If ClientBuySell = "Sell" And tsTMP = "C" Then
+                strPF = ts_payoff.Range("H2").Value
+            ElseIf ClientBuySell = "Sell" And tsTMP = "P" Then
+                strPF = ts_payoff.Range("H4").Value
+            ElseIf ClientBuySell = "Buy" And tsTMP = "C" Then
+                strPF = ts_payoff.Range("H6").Value
+            ElseIf ClientBuySell = "Buy" And tsTMP = "P" Then
+                strPF = ts_payoff.Range("H8").Value
+            End If
+        Case "0", "2"
+            If ClientBuySell = "Sell" And tsTMP = "C" Then
+                strPF = ts_payoff.Range("H3").Value
+            ElseIf ClientBuySell = "Sell" And tsTMP = "P" Then
+                strPF = ts_payoff.Range("H5").Value
+            ElseIf ClientBuySell = "Buy" And tsTMP = "C" Then
+                strPF = ts_payoff.Range("H7").Value
+            ElseIf ClientBuySell = "Buy" And tsTMP = "P" Then
+                strPF = ts_payoff.Range("H9").Value
+            End If
+            
+            strPF = Replace(strPF, "_tsSettle_cht_", tsCCY(payout_ccy, "cht"))
+            strPF = Replace(strPF, "_tsSettle_eng_", tsCCY(payout_ccy, "eng"))
+        End Select
+    ElseIf Prod.Item("strategy") = "AKOEKI FWD" Then
+    End If
+
+    tsPayoff = strPF
+End Function
+Private Function tsTradeDate(Prod As Object, lan As String) As String
+    tsTradeDate = tsDate(Prod.Item("trade_date"), lan)
+End Function
+Private Function tsExpDate(Prod As Object, lan As String, multi As Integer, ii As Integer) As String
+    If multi = 1 Then
+        tsExpDate = tsDate(Prod.Item("exp_date"), lan)
+    Else
+        tsExpDate = tsDate(Prod.Item("exp" & ii), lan)
+    End If
+End Function
+Private Function tsDelDate(Prod As Object, lan As String, multi As Integer, ii As Integer) As String
+    If multi = 1 Then
+        tsDelDate = tsDate(Prod.Item("del_date"), lan)
+    Else
+        tsDelDate = tsDate(Prod.Item("del" & ii), lan)
+    End If
+End Function
+Private Function tsDate(strdate As String, lan As String) As String
+    Dim ddate As Date
+    
+    ddate = CDate(Left(strdate, 4) & "/" & Mid(strdate, 5, 2) & "/" & Right(strdate, 2))
+    If lan = "cht" Then     'yyyy 年 mm 月 dd 日
+        tsDate = Format(ddate, "dddddd")
+    Else                    'dd mmm yyyy
+        tsDate = Format(ddate, "dd") & " " & Format(ddate, "mmm") & " " & Format(ddate, "yyyy")
+    End If
+End Function
+
+Private Function tsINST(Prod As Object, lan As String) As String
+    If lan = "cht" Then
+        tsINST = tsCCY(Prod.Item("nom1_ccy"), lan) & "兌" & tsCCY(Prod.Item("nom2_ccy"), lan)
+    Else
+        tsINST = tsCCY(Prod.Item("nom1_ccy"), lan) & "/" & tsCCY(Prod.Item("nom2_ccy"), lan)
+    End If
+End Function
+
+Private Function tsCCY(CCY As String, lan As String) As String
+    Dim strCCY As String
+    
+    If lan = "cht" Then
+        Select Case CCY
+        Case "AUD": strCCY = "澳幣"
+        Case "CAD": strCCY = "加幣"
+        Case "CHF": strCCY = "法郎"
+        Case "CN1": strCCY = "人民幣"
+        Case "CNH": strCCY = "人民幣"
+        Case "EUR": strCCY = "歐元"
+        Case "GBP": strCCY = "英鎊"
+        Case "JPY": strCCY = "日圓"
+        Case "NZD": strCCY = "紐幣"
+        Case "TW1": strCCY = "台幣"
+        Case "USD": strCCY = "美金"
+        Case Else: strCCY = ""
+        End Select
+    Else
+        Select Case CCY
+        Case "CN1": strCCY = "CNY"
+        Case "TW1": strCCY = "TWD"
+        Case Else: strCCY = CCY
+        End Select
+    End If
+    tsCCY = strCCY
+End Function
+ 
+Private Function tsNom(Prod As Object, lan As String) As String
+    If lan = "cht" Then
+        tsNom = tsCCY(Prod.Item("stg_nom_ccy"), lan) & " " & Format(Prod.Item("stg_nom1"), "#,##0.00") & " 元"
+    Else
+        tsNom = tsCCY(Prod.Item("stg_nom_ccy"), lan) & " " & Format(Prod.Item("stg_nom1"), "#,##0.00")
+    End If
+End Function
+
+Private Function tsPrem(Prod As Object, lan As String) As String
+    Dim stg_prem_amt As String, stg_prem_bank As String, stg_prem_ccy As String, stg_prem_date As String
+    
+    stg_prem_amt = Prod.Item("stg_prem_amt")
+    stg_prem_bank = Prod.Item("stg_prem_bank")
+    stg_prem_ccy = Prod.Item("stg_prem_ccy")
+    stg_prem_date = Prod.Item("stg_prem_date")
+    
+    If lan = "cht" Then
+        If stg_prem_bank = "pay" Then
+            tsPrem = "甲方將於" & tsDate(stg_prem_date, lan) & "支付權利金 " & tsCCY(stg_prem_ccy, lan) & Format(VBA.CDbl(stg_prem_amt), "#,##0,00") & "元"
+        Else
+            tsPrem = "甲方將於" & tsDate(stg_prem_date, lan) & "收取權利金 " & tsCCY(stg_prem_ccy, lan) & Format(VBA.CDbl(stg_prem_amt), "#,##0,00") & "元"
+        End If
+    Else
+        If stg_prem_bank = "pay" Then
+            tsPrem = tsCCY(stg_prem_ccy, lan) & " " & Format(VBA.CDbl(stg_prem_amt), "#,##0,00") & " paid by party A on " & tsDate(stg_prem_date, lan)
+        Else
+            tsPrem = tsCCY(stg_prem_ccy, lan) & " " & Format(VBA.CDbl(stg_prem_amt), "#,##0,00") & " received by party A on " & tsDate(stg_prem_date, lan)
+        End If
+    End If
+End Function
+
+Private Function tsTFCB(Prod As Object, lan As String) As String
+    If lan = "cht" Then
+        If Prod.Item("entity") = "DBU" Then
+            tsTFCB = "台北富邦商業銀行股份有限公司"
+        Else
+            tsTFCB = "台北富邦銀行國際金融業務分行"
+        End If
+    Else
+        If Prod.Item("entity") = "DBU" Then
+            tsTFCB = "Taipei Fubon Commercial Bank Co.,Ltd"
+        Else
+            tsTFCB = "Taipei Fubon Commercial Bank Co.,Ltd, Offshore Banking Unit"
+        End If
+    End If
+End Function
+
+Private Function tsCNPT(Prod As Object, lan As String) As String
+    If lan = "cht" Then
+        tsCNPT = Prod.Item("name_cht")
+    Else
+        tsCNPT = Prod.Item("name")
+    End If
+End Function
+
+Private Function tsFixPage(Prod As Object) As String
+    Dim strINST As String
+    
+    strINST = Prod.Item("inst")
+    Select Case strINST
+    Case "USDJPY", "EURUSD", "GBPUSD", "USDCHF"
+        tsFixPage = ts_mapping.Range("B2").Value
+    Case "NZDUSD", "AUDUSD"
+        tsFixPage = ts_mapping.Range("B3").Value
+    Case Else: tsFixPage = ""
+    End Select
+End Function
+
+Private Function tsFixConv(Prod As Object, lan As String) As String
+    Dim strINST As String
+    
+    strINST = Prod.Item("inst")
+    
+    Select Case strINST
+    Case "USDJPY", "EURUSD", "GBPUSD", "USDCHF"
+        If lan = "cht" Then tsFixConv = "東京" Else tsFixConv = "Tokyo"
+    Case "NZDUSD", "AUDUSD"
+        If lan = "cht" Then tsFixConv = "雪梨" Else tsFixConv = "Sidney"
+    Case Else: tsFixConv = ""
+    End Select
+End Function
+
+Private Function tsDelConv(Prod As Object, lan As String) As String
+    Dim CCY1 As String, CCY2 As String, payout_ccy As String, settlement As String
+    
+    CCY1 = Prod.Item("nom1_ccy")
+    CCY2 = Prod.Item("nom2_ccy")
+    payout_ccy = Prod.Item("payout_ccy")
+    settlement = Prod.Item("settlement")
+    
+    Select Case settlement
+    Case "0", "2"
+        tsDelConv = tsCCYconv(payout_ccy, lan) & ", " & tsCCYconv("TW1", lan)
+    Case "1", "3", "4"
+        tsDelConv = tsCCYconv(CCY1, lan) & ", " & tsCCYconv(CCY2, lan) & ", " & tsCCYconv("TW1", lan)
+    Case Else: tsDelConv = ""
+    End Select
+End Function
+
+Private Function tsCCYconv(CCY As String, lan As String) As String
+
+    Dim strCCY As String
+    If lan = "cht" Then
+        Select Case CCY
+        Case "AUD": strCCY = "雪梨"
+        Case "CAD": strCCY = ""
+        Case "CHF": strCCY = ""
+        Case "CN1": strCCY = "北京"
+        Case "CNH": strCCY = "北京, 香港"
+        Case "EUR": strCCY = "TARGET"
+        Case "GBP": strCCY = "倫敦"
+        Case "JPY": strCCY = "東京"
+        Case "NZD": strCCY = "威靈頓"
+        Case "TW1": strCCY = "台北"
+        Case "USD": strCCY = "紐約"
+        Case Else: strCCY = ""
+        End Select
+    Else
+        Select Case CCY
+        Case "AUD": strCCY = "Sidnsy"
+        Case "CAD": strCCY = ""
+        Case "CHF": strCCY = ""
+        Case "CN1": strCCY = "Beijing"
+        Case "CNH": strCCY = "Beijing, Hong Kong"
+        Case "EUR": strCCY = "TARGET"
+        Case "GBP": strCCY = "London"
+        Case "JPY": strCCY = "Tokyo"
+        Case "NZD": strCCY = "Wellington"
+        Case "TW1": strCCY = "Taipei"
+        Case "USD": strCCY = "New York"
+        Case Else: strCCY = ""
+        End Select
+    End If
+    tsCCYconv = strCCY
+End Function
+
+Private Function tsBarType(Prod As Object) As String
+    Dim strBarType As String: strBarType = Prod.Item("bar_type")
+    
+    If Prod.Item("strategy") = "AKOFWD" Then
+        tsBarType = ts_mapping.Range("G" & VBA.CStr(VBA.CDbl(strBarType) + 2)).Value
+    ElseIf Prod.Item("strategy") = "EKOFWD" Then
+        tsBarType = ts_mapping.Range("G" & VBA.CStr(VBA.CDbl(strBarType) - 2)).Value    'TODO
+    ElseIf Prod.Item("strategy") = "AKOEKI OPT" Then
+        tsBarType = ts_mapping.Range("G" & VBA.CStr(VBA.CDbl(strBarType) + 2)).Value
+    End If
+End Function
+
+Private Function tsEBarType(Prod As Object)
+    Dim strCP As String: strCP = Prod.Item("call_put")
+    
+    If strCP = "C" And Prod.Item("strategy") = "AKOEKI OPT" Then
+        tsEBarType = ts_mapping.Range("H6").Value
+    ElseIf strCP = "P" And Prod.Item("strategy") = "AKOEKI OPT" Then
+        tsEBarType = ts_mapping.Range("H8").Value
+    End If
+End Function
+
+Private Function tsSettle(Prod As Object, lan As String) As String
+    Dim settlement As String, payout_ccy As String
+    
+    settlement = Prod.Item("settlement")
+    payout_ccy = Prod.Item("payout_ccy")
+    If lan = "cht" Then
+        Select Case settlement
+        Case "0", "2": tsSettle = "以" & tsCCY(payout_ccy, lan) & "差額交割"
+        Case "1", "3", "4": tsSettle = "實質交割"
+        End Select
+    Else
+        Select Case settlement
+        Case "0", "2": tsSettle = "Cash settled in " & payout_ccy
+        Case "1", "3", "4": tsSettle = "Physical delivery"
+        End Select
+    End If
+End Function
+
+
+
