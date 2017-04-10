@@ -1,0 +1,77 @@
+Option Explicit
+Function mAHTMLBody(Prod As Object, strategy As String, Nom_ccy As String, tempString As String, num As Integer) As String
+    Dim TradeDate As String, CNTP As String, ABBR As String, entity As String, EXE As String, CUTOFF As String, SETTLE As String
+    
+    CUTOFF = Prod.Item("cut_off") & " Cut"
+    SETTLE = Product.getSettleType(Prod)
+    TradeDate = Confirm.FormatPremDate(Prod.Item("trade_date"))
+    CNTP = Prod.Item("name")
+    ABBR = Prod.Item("abbr")
+    entity = Prod.Item("entity") & " booking"
+    If Prod.Item("exe_type") = "E" Or Prod.Item("exe_type") = "D" Then EXE = "European Style Option"
+    
+    mAHTMLBody = "<html><body><font face=新細明體>"
+    mAHTMLBody = mAHTMLBody & "<font style=""font-size:12pt"">TAIPEI FUBON OPT Deals Done: " & CNTP & "<br>"
+    mAHTMLBody = mAHTMLBody & "Trade Date: " & TradeDate & "<br>"
+    mAHTMLBody = mAHTMLBody & "Fixing cut: " & CUTOFF & "<br>"
+    mAHTMLBody = mAHTMLBody & EXE & "<br>"
+    mAHTMLBody = mAHTMLBody & SETTLE & ", " & entity & "<br><br><br>"
+    mAHTMLBody = mAHTMLBody & "To Confirm " & UCase(ABBR) & "<br>"
+    
+    If strategy = "" Then
+        If sh_main.Range("L6").Value = "ByPackageNum" Then
+            mAHTMLBody = mAHTMLBody & tempString & "<br>"
+        End If
+        mAHTMLBody = mAHTMLBody & Product.getProdPayoff(Prod, Nom_ccy) & " <br>" & Product.getProdTenor(Prod, 1) & "<br>"
+        mAHTMLBody = mAHTMLBody & Confirm.getPremType(Prod.Item("buy_sell"), Format(Prod.Item("prem_amt"), "Standard"), Prod.Item("prem_ccy"), Prod.Item("prem_date"))
+    ElseIf strategy = "AKOFWD" Or strategy = "EKOFWD" Or strategy = "AKOEKI OPT" Then
+        mAHTMLBody = mAHTMLBody & Product.getProdPayoff2(Prod, num) & "<br>"
+        mAHTMLBody = mAHTMLBody & "Prem in " & Prod.Item("stg_prem_ccy") & " " & Format(Prod.Item("stg_prem_amt"), "Standard") & " TFCB " & Prod.Item("stg_prem_bank") & " val " & FormatPremDate(Prod.Item("stg_prem_date"), 2)
+    End If
+    
+    mAHTMLBody = mAHTMLBody & "<br><br><br>" & "--End Report<br></font></body></html>"
+End Function
+
+Function mBHTMLBody(strBank As String, Triggeredate As Date, strINST As String, strBarrier As String, strPayment As String) As String
+    Triggeredate = Format(Triggeredate, "yyyy/mm/dd")
+    Dim HTMLBody As String
+    
+    HTMLBody = "<html><body><font face=新細明體>"
+    HTMLBody = HTMLBody & "<font style=""font-size:12pt"">"
+    HTMLBody = HTMLBody & "TAIPEI FUBON OPT Barrier Triggered Report: " & strBank & "<br>"
+    HTMLBody = HTMLBody & "Triggered Date: " & Triggeredate & "<br><br><br>"
+    HTMLBody = HTMLBody & "Confirm " & UCase(strINST) & " option barrier " & strBarrier & " triggered.<br>"
+    
+    If strPayment = "" Then
+        HTMLBody = HTMLBody & "<br><br>"
+    Else
+        HTMLBody = HTMLBody & strPayment & "<br><br>"
+    End If
+    
+    HTMLBody = HTMLBody & "--End Report</font></body></html>"
+    mBHTMLBody = HTMLBody
+End Function
+
+Function mFHTMLBody(strBank As String, Reportdate As Date) As String
+    Dim HTMLBody As String, strLine As String
+    Dim i As Long
+    
+    Reportdate = Format(Reportdate, "yyyy/mm/dd")
+    
+    HTMLBody = "<html><body><font face=新細明體>"
+    HTMLBody = HTMLBody & "<font style=""font-size:12pt"">"
+
+    i = 1
+    Do While sh_main.Range("I15").Offset(i, 0).Value <> "--End Report"
+        strLine = sh_main.Range("I15").Offset(i, 0).Value
+        If strLine <> "" Then
+            HTMLBody = HTMLBody & strLine & "<br>"
+        Else
+            HTMLBody = HTMLBody & "<br>"
+        End If
+        i = i + 1
+    Loop
+
+    HTMLBody = HTMLBody & "--End Report</font></body></html>"
+    mFHTMLBody = HTMLBody
+End Function
