@@ -1,0 +1,366 @@
+Option Explicit
+
+Public Const dbfname = "DB_mxdeal.xls"
+Public dbfpath As String, strEmail As String, tsFullfname As String
+Public vMsg As Double
+
+
+'Create eamil by CDO
+Public iMsg As Object
+
+Public Declare Function WNetGetUser Lib "mpr.dll" Alias "WNetGetUserA" (ByVal lpName As String, ByVal lpUserName As String, lpnLength As Long) As Long
+
+Public Sub getEmail(Func As String, Bank As String, Client As String, strTO As String, strCC As String)
+    Dim i As Long, strItem As String, strValue1 As String, strValue2 As String, strSQL As String
+    ' Table: Email Rule
+    Dim Mailto As Object: Set Mailto = CreateObject("Scripting.Dictionary")
+    Dim Mailcc As Object: Set Mailcc = CreateObject("Scripting.Dictionary")
+    
+    For i = 1 To 1000
+        strItem = sh_rule.Range("A1").Offset(i, 0) & sh_rule.Range("A1").Offset(i, 1) & sh_rule.Range("A1").Offset(i, 2)
+        strValue1 = sh_rule.Range("E1").Offset(i, 0)
+        strValue2 = sh_rule.Range("F1").Offset(i, 0)
+        If strItem <> "" Then
+            Mailto.Add LCase(Trim(strItem)), strValue1
+            Mailcc.Add LCase(Trim(strItem)), strValue2
+        Else
+            Exit For
+        End If
+    Next
+
+    strSQL = "select NAME from [cntp_name$] where (ABBR='" & UCase(Bank) & "' and ENTITY='DBU')"
+    
+    ' Get email from table
+    If LCase(Bank) = "test" Then
+        strTO = Mailto.Item(Bank & Func & "all")
+        strCC = Mailcc.Item(Bank & Func & "all")
+    Else
+        '第一順位: 如果 client 有特別設定寄信群組, 以此優先。
+        If Mailto.exists(Bank & Func & Client) Then
+            strTO = Mailto.Item(Bank & Func & Client)
+            strCC = Mailcc.Item(Bank & Func & Client) & ";" & Mailcc.Item("tfcb" & Func & "all")
+        '第二順位: 如果 client沒有特別設定寄信群組, 寄給全部詢價者
+        ElseIf Mailto.exists(Bank & Func & "all") Then
+            strTO = Mailto.Item(Bank & Func & "all")
+            strCC = Mailcc.Item(Bank & Func & "all") & ";" & Mailcc.Item("tfcb" & Func & "all")
+        '第三順位:如果完全沒有設定,寄給 client 本人
+        Else
+            strSQL = "select email from [ib_client$] where (lcase(name_eng)='" & LCase(Client) & "' and bank='" & "')"
+            strCC = Mailcc.Item("tfcb" & Func & "all")
+        End If
+    End If
+    
+    Set Mailto = Nothing: Set Mailcc = Nothing
+End Sub
+
+Public Function getTestEmail() As String
+    Dim USER As String, strTO As String, temp As String
+    
+    USER = Environ("UserName")
+    temp = WorksheetFunction.VLookup(LCase(USER), sh_user.Columns("A:B"), 2, False)
+    If Right(temp, 9) = "fubon.com" Then
+        strTO = temp
+    Else
+        strTO = sh_main.Range("I9").Value
+        MsgBox "此帳號 " & USER & " 尚未設定 email, 預設為 " & strTO
+    End If
+    getTestEmail = strTO
+End Function
+
+Public Sub MailB(TriggeredDate As Date, Bank As String, Client As String, CCYpair As String, strBarrier As String, strPayment As String, TestEmail As Boolean)
+    ' Get email address according to Bank/CLient/Job
+    Dim strTO As String, strCC As String, strBank As String
+    
+    If TestEmail Then
+        strEmail = getTestEmail
+    Else
+         Call getEmail("cfmbartrig", Bank, Client, strTO, strCC)
+    End If
+    
+    init_smtpserver
+    
+    With iMsg
+        If TestEmail Then strTO = strEmail
+        .To = strTO
+        .CC = strCC
+        .from = """台北富邦銀行外匯選擇權交易科""<" & getTestEmail & ">"
+        .Subject = "TAIPEI FUBON OPT Barrier Triggered Report"
+        .HTMLBody = BodyXML.mBHTMLBody(UCase(Bank), TriggeredDate, CCYpair, strBarrier, strPayment)
+        
+        If Not TestEmail Then
+            vMsg = MsgBox("正式發送信件給 " & UCase(Bank) & " ? ", 1)
+            If vMsg = 1 Then .send
+        Else
+            .send
+            MsgBox "測試信件已寄給 " & strTO
+        End If
+    End With
+    Set iMsg = Nothing
+End Sub
+
+Public Sub MailF(Reportdate As Date, Func As String, Bank As String, Client As String, TestEmail As Boolean, Att() As String, icount As Integer)
+
+    ' Get email address according to Bank/CLient/Job
+    Dim strTO As String, strCC As String, strBank As String, abc As Variant
+    Dim i As Integer
+    
+    If TestEmail Then
+        strEmail = getTestEmail
+    Else
+        Call getEmail(Func, Bank, Client, strTO, strCC)
+    End If
+    
+    init_smtpserver
+
+    With iMsg
+        If TestEmail Then strTO = strEmail
+        .To = strTO
+        .CC = strCC
+        .from = """台北富邦銀行外匯選擇權交易科""<" & getTestEmail & ">"
+        .ReplyTo = strTO & ";" & strCC
+        .Subject = sh_main.Range("I13").Offset(1, 0).Value
+        .HTMLBody = BodyXML.mFHTMLBody(strBank, Reportdate)
+        
+        For i = 1 To icount
+            .AddAttachment Att(i)
+        Next i
+
+        If Not TestEmail Then
+            vMsg = MsgBox("正式發送信件給 " & UCase(Bank) & " ? ", 1)
+            If vMsg = 1 Then .send
+        Else
+            .send
+            MsgBox "測試信件已寄給 " & strTO
+        End If
+    End With
+    
+    Set iMsg = Nothing
+End Sub
+
+Public Sub MailA(Bank As String, Client As String, Method As String, TestEmail As Boolean)
+    ' Get email address according to Bank/CLient/Job
+    Dim strTO As String, strCC As String, strBank As String, CDOserver As String, myCnc As String, myCmd As String
+    Dim Prod(1) As Object, myCon As Object, myRst As Object
+    Dim i As Long, j As Long, k As Long, strH As String, strV As String
+    Dim DealNum As String, strategy As String, Nom_ccy As String, AttTermsheet As String, temp_HTMLBody As String
+    Dim icount As Integer, rng As Range
+    Dim multiProd() As Object
+    Dim multi As Boolean
+    
+    Set Prod(1) = CreateObject("Scripting.Dictionary")
+    Set myCon = CreateObject("ADODB.Connection")
+    Set myRst = CreateObject("ADODB.Recordset")
+    
+    If TestEmail Then
+        strEmail = getTestEmail
+    Else
+        Call getEmail("cfmopt", Bank, Client, strTO, strCC)
+    End If
+    
+    myCnc = "Driver={Microsoft Excel Driver (*.xls)};" & "DBQ=" & ThisWorkbook.Path & "\" & dbfname & ";"
+    myCon.Open "Provider=MSDASQL;" & myCnc
+    
+    i = 1
+    With sh_main
+        Do While .Range("K7").Offset(i, 0).Value <> ""
+            DealNum = CStr(.Range("K7").Offset(i, 0).Value)
+            Nom_ccy = .Range("L7").Offset(i, 0).Value
+            strategy = .Range("M7").Offset(i, 0).Value
+            AttTermsheet = .Range("N7").Offset(i, 0).Value
+            
+            If strategy = "" Then
+                If LCase(Method) = LCase("bydealnum") Then
+                    myCmd = "select * from [cntp_name$] as A right join ( select * from [trn_today$] where nb=" & DealNum & ") as B on A.LABEL=B.cntp"
+                ElseIf LCase(Method) = LCase("bycontractnum") Then
+                    myCmd = "select * from [cntp_name$] as A right join ( select * from [trn_today$] where cnt=" & DealNum & ") as B on A.LABEL=B.cntp"
+                ElseIf LCase(Method) = LCase("ByPackageNum") Then
+                    myCmd = "select * from [cntp_name$] as A right join ( select * from [trn_today$] where pck=" & DealNum & ") as B on A.LABEL=B.cntp order by cnt"
+                End If
+                multi = False
+            Else
+                If LCase(Method) <> LCase("ByPackageNum") Then
+                    MsgBox "請選擇 ByPackageNum , 程式終止"
+                    Exit Sub
+                Else
+                    myCmd = "select count(*) from [trn_today$] where pck=" & DealNum
+                    myRst.Open Source:=myCmd, ActiveConnection:=myCon
+                    icount = myRst.Fields.Item(0).Value
+                    multi = True
+                    
+                    ReDim multiProd(1 To icount)
+                    
+                    For k = 1 To icount
+                        Set multiProd(k) = CreateObject("Scripting.Dictionary")
+                    Next k
+                    
+                    Set myRst = Nothing
+                    Set myRst = CreateObject("ADODB.Recordset")
+                    
+                    myCmd = "select * from [cntp_name$] as A right join ( select * from [trn_today$] where pck=" & DealNum & ") as B on A.LABEL=B.cntp order by cnt"
+                End If
+            End If
+            
+            myRst.Open Source:=myCmd, ActiveConnection:=myCon
+
+            If myRst.EOF Then
+                MsgBox "查詢失敗, 請確認" & Chr(10) & Chr(10) & "1.單號是否存在" & Chr(10) & "2.已執行過 export_mx_today 程式" & Chr(10) & "3.Excel輸入格式是否為數值" & Chr(10) & "4.請確認method是否正確。"
+                GoTo ErrorHandler
+            End If
+            
+            temp_HTMLBody = ""
+            If strategy = "" Then
+                Call Product.setProd1(myRst, Prod(1), temp_HTMLBody)
+                
+                If UCase(Bank) <> Prod(1).Item("abbr") And UCase(Bank) <> "TEST" Then
+                    MsgBox "Excel Conterparty 欄位與 Murex 單號的交易對手不一致, 請確認。"
+                    GoTo ErrorHandler
+                End If
+                
+                If AttTermsheet = "Y" Then Call Termsheet.generateTermsheet(Prod(1), 1)
+            ElseIf strategy = "AKOEKI OPT" Or strategy = "AKOFWD" Or strategy = "EKOFWD" Then
+                Call Product.setProd2(myRst, multiProd(), icount, strategy, Nom_ccy)
+                
+                If UCase(Bank) <> multiProd(1).Item("abbr") And UCase(Bank) <> "TEST" Then
+                    MsgBox "Excel Conterparty 欄位與 Murex 單號的交易對手不一致, 請確認。"
+                    GoTo ErrorHandler
+                End If
+                If AttTermsheet = "Y" Then Call Termsheet.generateTermsheet(multiProd(1), icount / 2)
+            End If
+            
+            init_smtpserver
+            
+            With iMsg
+                If TestEmail Then strTO = strEmail
+                .To = strTO
+                .CC = strCC
+                .from = """台北富邦銀行外匯選擇權交易科""<" & getTestEmail & ">"
+                .ReplyTo = strTO & ";" & strCC
+                If multi Then
+                    .Subject = mASubject(multiProd(1), strategy)
+                    .HTMLBody = BodyXML.mAHTMLBody(multiProd(1), strategy, Nom_ccy, temp_HTMLBody, icount / 2)
+                Else
+                    .Subject = mASubject(Prod(1), strategy)
+                    .HTMLBody = BodyXML.mAHTMLBody(Prod(1), strategy, Nom_ccy, temp_HTMLBody, 1)
+                End If
+                
+                
+                If AttTermsheet = "Y" Then
+                    If Dir(tsFullfname & ".doc") <> "" Then
+                        .AddAttachment tsFullfname & ".doc"
+                    Else
+                        MsgBox "檔案不存在: " & tsFullfname & ".doc , 寄件程序將繼續。"
+                    End If
+                    
+                    If Dir(tsFullfname & ".pdf") <> "" Then
+                        .AddAttachment tsFullfname & ".pdf"
+                    Else
+                        MsgBox "檔案不存在: " & tsFullfname & ".pdf , 寄件程序將繼續。"
+                    End If
+                End If
+                
+                If Not TestEmail Then
+                    vMsg = MsgBox("正式發送 CFM " & CStr(DealNum) & " 信件給 " & UCase(Bank) & " ? ", 1)
+                    If vMsg = 1 Then .send
+                Else
+                    .send
+                    MsgBox "單號 " & CStr(DealNum) & " 測試信件已寄給 " & strTO
+                End If
+            End With
+            Set iMsg = Nothing
+            
+            If strategy = "" Then
+                Prod(1).RemoveAll
+            ElseIf strategy = "AKOEKI OPT" Or strategy = "AKOFWD" Or strategy = "EKOFWD" Then   'TODO
+                For k = 1 To icount
+                    multiProd(k).RemoveAll
+                Next k
+            End If
+            myRst.Close
+            i = i + 1
+        Loop
+    End With
+    
+    myCon.Close
+    Set myCon = Nothing
+    Set myRst = Nothing
+    Set Prod(1) = Nothing
+    
+    For k = 1 To icount
+        Set multiProd(k) = Nothing
+    Next k
+    
+    Exit Sub
+    
+    
+ErrorHandler:
+    If IsObject(myRst) Then
+        If myRst.State = 1 Then
+            myRst.Close
+        End If
+        Set myRst = Nothing
+    End If
+    If IsObject(myCon) Then
+        If myCon.State = 1 Then
+            myCon.Close
+        End If
+        Set myCon = Nothing
+    End If
+
+    Set Prod(1) = Nothing
+    For k = 1 To icount
+        Set multiProd(k) = Nothing
+    Next k
+End Sub
+
+Private Sub init_smtpserver()   'email by CDO
+    Set iMsg = CreateObject("CDO.Message")
+    With iMsg.Configuration.Fields
+        .Item("http://schemas.microsoft.com/cdo/configuration/sendusing") = 2
+        .Item("http://schemas.microsoft.com/cdo/configuration/smtpserver") = "fubon.com"
+        .Item("http://schemas.microsoft.com/cdo/configuration/smtpserverport") = 25
+        .Update
+    End With
+End Sub
+
+Private Function mASubject(Prod As Object, strategy As String) As String
+    Dim tkt As String
+    If strategy = "" Then
+        If sh_main.Range("L6").Value = "ByPackageNum" Then
+            mASubject = "CFM " & fixCCY(Prod.Item("nom1_ccy")) & fixCCY(Prod.Item("nom2_ccy")) & " " & "OPT" & " deal done-" & Prod.Item("abbr")
+        Else
+            mASubject = "CFM " & fixCCY(Prod.Item("nom1_ccy")) & fixCCY(Prod.Item("nom2_ccy")) & " " & "OPT" & " deal done-" & Prod.Item("abbr") & "-" & Prod.Item("nb")
+        End If
+    Else
+        mASubject = "CFM " & fixCCY(Prod.Item("nom1_ccy")) & fixCCY(Prod.Item("nom2_ccy")) & " " & strategy & " deal done-" & Prod.Item("abbr") & "-" & Prod.Item("pck")
+    End If
+End Function
+
+Public Function FormatPremDate(strdate As String, Optional datetype As Long = 1) As String
+    Dim ddate As Date
+    
+    ddate = CDate(Left(strdate, 4) & "/" & Mid(strdate, 5, 2) & "/" & Right(strdate, 2))
+    
+    Select Case datetype
+        Case 1: FormatPremDate = Format(ddate, "yyyy/mm/dd")    ' 2015/05/25
+        Case 2: FormatPremDate = Format(ddate, "dd") & Format(ddate, "mmm") & Format(ddate, "yyyy")   ' 25May2015
+    End Select
+End Function
+
+Public Function getPremType(buy_sell As String, prem_amt As String, prem_ccy As String, prem_date As String) As String
+    Dim prem_pay As String
+    
+    prem_pay = "pay"
+    If LCase(buy_sell) = "sell" Then prem_pay = "rec"
+    getPremType = "Prem in " & prem_ccy & " " & prem_amt & " TFCB " & prem_pay & " val " & FormatPremDate(prem_date, 2)
+End Function
+
+Public Sub PrintPDF(wrdDoc As Object, tsFullfname As String)
+    ' Need Microsoft word 12.0 Object library
+wrdDoc.ExportAsFixedFormat OutputFileName:= _
+        tsFullfname & ".pdf", _
+        ExportFormat:=wdExportFormatPDF, OpenAfterExport:=False, OptimizeFor:= _
+        wdExportOptimizeForPrint, Range:=wdExportAllDocument, from:=1, To:=1, _
+        Item:=wdExportDocumentContent, IncludeDocProps:=True, KeepIRM:=True, _
+        CreateBookmarks:=wdExportCreateNoBookmarks, DocStructureTags:=True, _
+        BitmapMissingFonts:=True, UseISO19005_1:=False
+End Sub
