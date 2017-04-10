@@ -1,0 +1,371 @@
+Option Explicit
+
+Public Sub setProd2(myRst As Object, multiP() As Object, num As Integer, strategy As String, n_ccy As String)
+    Dim j As Long, i As Long, strH As String, strV As String, field_nom As String
+    Dim ClientBuySellFwd As String, ClientBuySellOpt As String, NOM1 As String, NOM2 As String
+    Dim stg_prem_amt As Double
+    Dim box As Object, temp As Integer, aa As Integer
+    Set box = CreateObject("Scripting.Dictionary")
+    
+    j = 1
+    i = 1
+    
+    Do While Not myRst.EOF
+        temp = i Mod (num + 1)
+        For j = 1 To myRst.Fields.Count
+            strH = LCase(myRst.Fields(j - 1).Name)
+            If IsNull(myRst.Fields(j - 1).Value) Then
+                strV = ""
+            Else
+                strV = myRst.Fields(j - 1).Value
+                ' convert date format from dd/mm/yyyy to yyyymmdd
+                If Right(strH, 4) = "date" Then strV = CStr(Right(strV, 4)) & CStr(Mid(strV, 4, 2)) & CStr(Left(strV, 2))
+                ' remove "/" from inst
+                If strH = "inst" Then strV = Left(strV, 3) & Right(strV, 3)
+            End If
+            
+            multiP(temp).Add strH, strV
+        Next j
+        If Not box.exists(multiP(temp).Item("del_date")) Then
+            box.Add multiP(temp).Item("del_date"), temp
+            Dim arr(2) As String
+            arr(0) = multiP(temp).Item("exp_date")
+            arr(1) = multiP(temp).Item("del_date")
+            box.Add temp, arr
+        Else
+            aa = box(multiP(temp).Item("del_date"))
+
+            '=======================================================================
+            If n_ccy = "" Or LCase(n_ccy) = "left" Then
+                field_nom = "nom1"
+            Else
+                field_nom = "nom2"
+            End If
+            
+            If strategy = "AKOFWD" Or strategy = "EKOFWD" Then
+                If multiP(aa).Item("buy_sell") = "SELL" And multiP(aa).Item("call_put") = "C" Then ClientBuySellFwd = "Buy": NOM1 = multiP(aa).Item(field_nom): NOM2 = multiP(temp).Item(field_nom)
+                If multiP(aa).Item("buy_sell") = "BUY" And multiP(aa).Item("call_put") = "P" Then ClientBuySellFwd = "Buy": NOM1 = multiP(temp).Item(field_nom): NOM2 = multiP(aa).Item(field_nom)
+                If multiP(aa).Item("buy_sell") = "SELL" And multiP(aa).Item("call_put") = "P" Then ClientBuySellFwd = "Sell": NOM1 = multiP(aa).Item(field_nom): NOM2 = multiP(temp).Item(field_nom)
+                If multiP(aa).Item("buy_sell") = "BUY" And multiP(aa).Item("call_put") = "C" Then ClientBuySellFwd = "Sell": NOM1 = multiP(temp).Item(field_nom): NOM2 = multiP(aa).Item(field_nom)
+        
+                multiP(aa).Add "strategy", strategy
+                multiP(aa).Add "stg_strike", multiP(aa).Item("strike")
+                multiP(aa).Add "stg_buysell", ClientBuySellFwd
+                multiP(aa).Add "stg_nom_ccy", multiP(aa).Item(field_nom & "_ccy")
+                multiP(aa).Add "stg_nom1", NOM1
+                multiP(aa).Add "stg_nom2", NOM2
+        
+                If multiP(aa).Item("buy_sell") = "SELL" Then
+                    stg_prem_amt = VBA.CDbl(multiP(aa).Item("prem_amt")) - VBA.CDbl(multiP(temp).Item("prem_amt"))
+                Else
+                    stg_prem_amt = VBA.CDbl(multiP(temp).Item("prem_amt")) - VBA.CDbl(multiP(aa).Item("prem_amt"))
+                End If
+                multiP(aa).Add "stg_prem_amt", VBA.CStr(VBA.Abs(stg_prem_amt))
+        
+                If VBA.Abs(VBA.CDbl(multiP(aa).Item("prem_amt"))) > 0# Then
+                    multiP(aa).Add "stg_prem_ccy", multiP(aa).Item("prem_ccy")
+                    multiP(aa).Add "stg_prem_date", multiP(aa).Item("prem_date")
+                Else
+                    multiP(aa).Add "stg_prem_ccy", multiP(temp).Item("prem_ccy")
+                    multiP(aa).Add "stg_prem_date", multiP(temp).Item("prem_date")
+                End If
+        
+                If stg_prem_amt < 0 Then
+                    multiP(aa).Add "stg_prem_bank", "pay"
+                Else
+                    multiP(aa).Add "stg_prem_bank", "rec"
+                End If
+        
+            ElseIf strategy = "AKOEKI OPT" Then
+        
+                NOM1 = multiP(aa).Item("nom1")
+                NOM2 = multiP(temp).Item("nom2")
+        
+                If multiP(aa).Item("call_put") = "C" Then
+                    multiP(aa).Add "stg_strike", multiP(aa).Item("strike") - VBA.CDbl(NOM2) / VBA.CDbl(NOM1)
+                Else
+                    multiP(aa).Add "stg_strike", multiP(aa).Item("strike") + VBA.CDbl(NOM2) / VBA.CDbl(NOM1)
+                End If
+        
+                If multiP(aa).Item("buy_sell") = "SELL" Then
+                    ClientBuySellOpt = "Buy"
+                Else
+                    ClientBuySellOpt = "Sell"
+                End If
+        
+                multiP(aa).Add "strategy", strategy
+                multiP(aa).Add "stg_eki", multiP(aa).Item("strike")
+                multiP(aa).Add "stg_buysell", ClientBuySellOpt
+                multiP(aa).Add "stg_nom1", NOM1
+                multiP(aa).Add "stg_nom_ccy", multiP(aa).Item("nom1_ccy")
+        
+                stg_prem_amt = VBA.CDbl(multiP(aa).Item("prem_amt")) + VBA.CDbl(multiP(temp).Item("prem_amt"))
+                multiP(aa).Add "stg_prem_amt", VBA.CStr(VBA.Abs(stg_prem_amt))
+        
+                If VBA.Abs(VBA.CDbl(multiP(aa).Item("prem_amt"))) > 0# Then
+                    multiP(aa).Add "stg_prem_ccy", multiP(aa).Item("prem_ccy")
+                    multiP(aa).Add "stg_prem_date", multiP(aa).Item("prem_date")
+                Else
+                    multiP(aa).Add "stg_prem_ccy", multiP(temp).Item("prem_ccy")
+                    multiP(aa).Add "stg_prem_date", multiP(temp).Item("prem_date")
+                End If
+        
+                If multiP(aa).Item("buy_sell") = "SELL" Then
+                    multiP(aa).Add "stg_prem_bank", "rec"
+                Else
+                    multiP(aa).Add "stg_prem_bank", "pay"
+                End If
+            End If
+            multiP(aa).Add "pair_trade_no", temp
+            '=======================================================================
+            box.Remove multiP(temp).Item("del_date")
+        End If
+        
+        ' FIX call/put if inst = USDTW1 or USDCN1
+        Call fixMXData(multiP(temp))
+        i = i + 1
+        myRst.MoveNext
+    Loop
+    For i = 1 To box.Count
+        multiP(1).Add "exp" & i, box(i)(0)
+        multiP(1).Add "del" & i, box(i)(1)
+    Next i
+End Sub
+
+
+Public Function getProdPayoff2(Prod As Object, num As Integer) As String
+
+    Dim strPF As String, tempString As String
+    
+    If Prod.Item("strategy") = "AKOFWD" Or Prod.Item("strategy") = "EKOFWD" Then
+        tempString = " " & Left(Prod.Item("strategy"), 3) & " "
+        strPF = Prod.Item("stg_buysell") & " " & Prod.Item("inst") & tempString & "Forward K " & Prod.Item("strike") & tempString & Prod.Item("bar0") & " <br>" & getProdTenor(Prod, num) & "<br>"
+        strPF = strPF & "Amt in " & Prod.Item("stg_nom_ccy") & " " & FormatNOM(Prod.Item("stg_nom1")) & " x " & FormatNOM(Prod.Item("stg_nom2"))
+    ElseIf Prod.Item("strategy") = "AKOEKI OPT" Then
+        Dim NOM1 As String: NOM1 = fixCCY(Prod.Item("nom1_ccy"))
+        Dim NOM2 As String: NOM2 = fixCCY(Prod.Item("nom2_ccy"))
+        Dim CP As String: CP = Prod.Item("call_put")
+        Dim STRIKE As String: STRIKE = Prod.Item("stg_strike")
+    
+        strPF = Prod.Item("stg_buysell") & " " & NOM1 & " " & VBA.LCase(CP) & " " & NOM2 & " " & VBA.LCase(getRevCP(CP)) & " K " & STRIKE & " EKI " & Prod.Item("stg_eki") & " AKO " & Prod.Item("bar0")
+        strPF = strPF & " amt in " & Prod.Item("stg_nom_ccy") & " " & FormatNOM(Prod.Item("stg_nom1")) & " " & getProdTenor(Prod, num)
+    End If
+    
+    getProdPayoff2 = strPF
+End Function
+
+Public Sub setProd1(myRst As Object, Prod As Object, ByRef temp_HTMLBody As String)
+    Dim j As Long, i As Integer, icount As Integer
+    Dim strH As String, strV As String
+    
+    icount = 0
+    Do While Not myRst.EOF
+        icount = icount + 1
+        myRst.MoveNext
+    Loop
+    
+    i = 0
+    myRst.moveFirst
+    Do While Not myRst.EOF
+        i = i + 1
+        For j = 1 To myRst.Fields.Count
+            strH = LCase(myRst.Fields(j - 1).Name)
+            If IsNull(myRst.Fields(j - 1).Value) Then
+                strV = ""
+            Else
+                strV = myRst.Fields(j - 1).Value
+                ' convert date format from dd/mm/yyyy to yyyymmdd
+                If Right(strH, 4) = "date" Then strV = CStr(Right(strV, 4)) & CStr(Mid(strV, 4, 2)) & CStr(Left(strV, 2))
+                    ' remove "/" from inst
+                If strH = "inst" Then strV = Left(strV, 3) & Right(strV, 3)
+            End If
+            Prod.Add strH, strV
+        Next j
+        ' FIX call/put if inst = USDTW1 or USDCN1
+        Call fixMXData(Prod)
+        
+        If i <> icount Then
+            temp_HTMLBody = temp_HTMLBody & "<br>"
+            temp_HTMLBody = temp_HTMLBody & Product.getProdPayoff(Prod, "") & " " & Product.getProdTenor(Prod) & "<br>"
+            temp_HTMLBody = temp_HTMLBody & Confirm.getPremType(Prod.Item("buy_sell"), Format(Prod.Item("prem_amt"), "Standard"), Prod.Item("prem_ccy"), Prod.Item("prem_date"))
+            Prod.RemoveAll
+        End If
+        
+        myRst.MoveNext
+    Loop
+End Sub
+Private Sub fixMXData(Prod As Object)
+    ' 1. FIX call/put if inst = USDTW1 or USDCN1
+    Dim str1 As String, str2 As String
+    Dim num1 As Double, num2 As Double
+    
+    If Prod.Item("inst") = "USDTW1" Or Prod.Item("inst") = "USDCN1" Then
+        str1 = Prod.Item("call_put")
+        If str1 = "C" Then
+            Prod.Item("call_put") = "P"
+        Else
+            Prod.Item("call_put") = "C"
+        End If
+        
+        str1 = Prod.Item("nom1_ccy"): num1 = Prod.Item("nom1")
+        str2 = Prod.Item("nom2_ccy"): num2 = Prod.Item("nom2")
+        
+        Prod.Item("nom1_ccy") = str2: Prod.Item("nom1") = num2
+        Prod.Item("nom2_ccy") = str1: Prod.Item("nom2") = num1
+    End If
+End Sub
+
+Public Function fixCCY(CCY As String) As String
+    Dim strCCY As String
+    Select Case CCY
+        Case "BR1": strCCY = "BRW"
+        Case "CN1": strCCY = "CNY"
+        Case "ID1": strCCY = "IDR"
+        Case "IN1": strCCY = "INR"
+        Case "KR1": strCCY = "KRW"
+        Case "MY1": strCCY = "MYR"
+        Case "PH1": strCCY = "PHP"
+        Case "RU1": strCCY = "RUB"
+        Case "TW1": strCCY = "TWD"
+        Case "VN1": strCCY = "VND"
+        Case Else: strCCY = CCY
+    End Select
+    fixCCY = strCCY
+End Function
+
+Public Function getProdPayoff(Prod As Object, n_ccy As String) As String
+    Dim ProdSpec As String, NOM As String, NOM1 As String, NOM2 As String, CP As String, STRIKE As String, ClientBuySell As String
+    
+    ProdSpec = Prod.Item("trn_type") & "_" & Prod.Item("exe_type")
+    NOM1 = fixCCY(Prod.Item("nom1_ccy"))
+    NOM2 = fixCCY(Prod.Item("nom2_ccy"))
+    CP = Prod.Item("call_put")
+    STRIKE = Prod.Item("strike")
+    
+    If n_ccy = "" Or n_ccy = "left" Then
+        NOM = "amt in " & NOM1 & " " & FormatNOM(Prod.Item("nom1"))
+    Else
+        NOM = "amt in " & NOM2 & " " & FormatNOM(Prod.Item("nom2"))
+    End If
+    
+    If Prod.Item("buy_sell") = "BUY" Then
+        ClientBuySell = "Sell"
+    Else
+        ClientBuySell = "Buy"
+    End If
+    
+    Select Case ProdSpec
+        Case "SMP_E"
+            ClientBuySell = ClientBuySell & " " & NOM1 & " " & VBA.LCase(CP) & " " & NOM2 & " " & VBA.LCase(getRevCP(CP)) & " K " & STRIKE
+            ClientBuySell = ClientBuySell & " " & NOM
+        
+        Case "SMP_D"
+            ClientBuySell = ClientBuySell & " " & NOM1 & " " & VBA.LCase(CP) & " " & NOM2 & " " & VBA.LCase(getRevCP(CP)) & " K " & STRIKE
+            ClientBuySell = ClientBuySell & " digital" & NOM
+            
+        Case "BAR_E"
+            ClientBuySell = ClientBuySell & " " & NOM1 & " " & VBA.LCase(CP) & " " & NOM2 & " " & VBA.LCase(getRevCP(CP)) & " K " & STRIKE & " " & getBarrierType(Prod)
+            ClientBuySell = ClientBuySell & " " & NOM
+        
+        Case "BAR_D"
+            ' no bar_st_date and bar_end_date
+        Case Else
+    End Select
+    
+    getProdPayoff = ClientBuySell
+End Function
+
+Private Function getBarrierType(Prod As Object) As String
+    Dim bar_style As String, bar0 As String, bar1 As String
+    
+    bar_style = getBarrierStyle(Prod)
+    bar0 = Prod.Item("bar0")
+    bar1 = Prod.Item("bar1")
+    
+    Select Case CStr(Prod.Item("bar_type"))
+        Case "0": getBarrierType = "Double " & bar_style & "KO " & bar0 & "-" & bar1
+        Case "1": getBarrierType = "Double " & bar_style & "KI " & bar0 & "-" & bar1
+        Case "2":
+        Case "3":
+        Case "4": getBarrierType = bar_style & "KI " & bar0 & " (Up-and-In)"
+        Case "5": getBarrierType = bar_style & "KO " & bar0 & " (Up-and-Out)"
+        Case "6": getBarrierType = bar_style & "KI " & bar0 & " (Down-and-In)"
+        Case "7": getBarrierType = bar_style & "KO " & bar0 & " (Down-and-Out)"
+    End Select
+End Function
+Private Function getBarrierStyle(Prod As Object) As String
+    If Prod.Item("bar_st_date") = Prod.Item("trade_date") And Prod.Item("bar_end_date") = Prod.Item("exp_date") Then
+        getBarrierStyle = "A"
+    ElseIf Prod.Item("bar_st_date") = Prod.Item("exp_date") And Prod.Item("bar_end_date") = Prod.Item("exp_date") Then
+        getBarrierStyle = "E"
+    Else
+        getBarrierStyle = "Window "
+    End If
+End Function
+
+Public Function getProdTenor(Prod As Object, num As Integer) As String
+    Dim expdate As String, deldate As String, i As Integer, ss As String
+    
+    If num = 1 Then
+        expdate = Prod.Item("exp_date")
+        deldate = Prod.Item("del_date")
+        getProdTenor = "Exp/Del " & FormatOPTDate(expdate, deldate)
+    Else
+        For i = 1 To num
+            expdate = Prod.Item("exp" & i)
+            deldate = Prod.Item("del" & i)
+            ss = ss & "Exp/Del " & FormatOPTDate(expdate, deldate) & "<br>"
+        Next i
+        getProdTenor = ss
+    End If
+End Function
+
+Private Function getRevCP(strCP As String) As String
+    If strCP = "C" Then getRevCP = "P"
+    If strCP = "P" Then getRevCP = "C"
+End Function
+
+Public Function FormatNOM(nom_str As String) As String
+    Dim NOM As Double
+    
+    NOM = VBA.CDbl(nom_str)
+    If NOM / 1000 < 1 Then
+        FormatNOM = CStr(NOM)
+    ElseIf NOM / 1000 >= 1 And NOM / 1000000 < 0.1 Then
+        FormatNOM = CStr(NOM / 1000) & "k"
+    ElseIf NOM / 1000000 >= 0.1 Then
+        FormatNOM = CStr(NOM / 1000000) & "mio"
+    End If
+End Function
+
+Public Function FormatOPTDate(expdate As String, deldate As String) As String
+    Dim dexpdate As Date, ddeldate As Date
+
+    dexpdate = CDate(Left(expdate, 4) & "/" & Mid(expdate, 5, 2) & "/" & Right(expdate, 2))
+    ddeldate = CDate(Left(deldate, 4) & "/" & Mid(deldate, 5, 2) & "/" & Right(deldate, 2))
+    
+    If Format(dexpdate, "mmm") = Format(ddeldate, "mmm") And Format(dexpdate, "yyyy") = Format(ddeldate, "yyyy") Then
+        FormatOPTDate = Format(dexpdate, "dd") & "/" & Format(ddeldate, "dd") & " " & Format(dexpdate, "mmm")
+        FormatOPTDate = FormatOPTDate & " " & Format(dexpdate, "yyyy")
+    ElseIf Format(dexpdate, "mmm") <> Format(ddeldate, "mmm") And Format(dexpdate, "yyyy") = Format(ddeldate, "yyyy") Then
+        FormatOPTDate = Format(dexpdate, "dd") & Format(dexpdate, "mmm") & " / " & Format(ddeldate, "dd") & Format(ddeldate, "mmm")
+        FormatOPTDate = FormatOPTDate & " " & Format(dexpdate, "yyyy")
+    ElseIf Format(dexpdate, "mmm") <> Format(ddeldate, "mmm") And Format(dexpdate, "yyyy") <> Format(ddeldate, "yyyy") Then
+        FormatOPTDate = Format(dexpdate, "dd") & Format(dexpdate, "mmm") & Format(dexpdate, "yyyy") & " / "
+        FormatOPTDate = FormatOPTDate & Format(ddeldate, "dd") & Format(ddeldate, "mmm") & Format(ddeldate, "yyyy")
+    End If
+End Function
+
+Public Function getSettleType(Prod As Object) As String
+    Dim settlement As String, payout_ccy As String
+    
+    settlement = Prod.Item("settlement")
+    payout_ccy = Prod.Item("payout_ccy")
+    Select Case settlement
+        Case "0": getSettleType = "Cash settled in " & payout_ccy
+        Case "1": getSettleType = "Physical delivery"
+        Case "2": getSettleType = "Cash settled in " & payout_ccy
+        Case "3": getSettleType = "Physical delivery"
+        Case "4": getSettleType = "Physical delivery"
+    End Select
+End Function
