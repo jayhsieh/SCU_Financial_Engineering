@@ -1,0 +1,105 @@
+#include <stdio.h>
+#include <cuda_runtime.h>
+#include <math.h>
+#include <stdlib.h>
+#include <curand_kernel.h>
+#include <iostream>
+#include <time.h>
+
+__constant__ unsigned short ErrorType[15][3] = { { 3, 2, 0 }, { 3, 0, 2 }, { 2, 3, 0 }, { 2, 0, 3 }, { 0, 3, 2 }, { 0, 2, 3 },	{ 4, 1, 0 }, { 4, 0, 1 }, { 1, 4, 0 }, { 1, 0, 4 }, { 0, 4, 1 }, { 0, 1, 4 }, { 5, 0, 0 }, { 0, 5, 0 }, { 0, 0, 5 } };
+
+const unsigned short number_check=5;
+const unsigned short color_ball=39;
+
+__device__ inline void BodyGPU(unsigned short *d_data, unsigned short *local_ans, unsigned  abc){
+	curandState s;
+	curand_init(1234, abc, 0, &s);
+	//for (unsigned short j = 0; j < color_ball; j++){
+		//local_ans[j]=abc*color_ball+j;
+		//local_ans[j]=ErrorType[short(curand_uniform(&s) * 15)][short(curand_uniform(&s) * 3)];
+	//}
+	unsigned short lineUse[3][13], CheckNumbers[5], tempContainer[39], UseTypeMaxNum = 15, local_row = 0, lineAddr[3];
+	
+	for (unsigned short i = 0; i < 3; i++){
+		lineAddr[i] = 0;
+		for (unsigned short j = 0; j < 13; j++){
+			lineUse[i][j] = 0;
+			tempContainer[i * 13 + j] = 0;
+		}
+	}
+	
+}
+		
+__global__ void Lotto(unsigned short *d_data, unsigned short *d_ans){
+	unsigned  abc = blockDim.x * blockIdx.x + threadIdx.x;
+	BodyGPU( d_data,&(d_ans[abc* color_ball]),abc);
+}
+		
+int main(int argc, char* argv[]){
+	if (argc != 3)
+		return 0;
+	else{
+		clock_t t1, t2;
+		t1 = clock();
+		
+		//*******************************************
+		//			read arguments
+		//*******************************************
+		char *p;
+		unsigned int back_steps = strtol(argv[1], &p, 10);
+		unsigned int how_many_tickets = strtol(argv[2], &p, 10);
+		if (how_many_tickets>10000000) return 0;
+		//*******************************************
+		//			host variables
+		//*******************************************
+		unsigned short *h_data,*h_ans;	
+		h_data=(unsigned short*)malloc(back_steps * number_check * sizeof(unsigned short));
+		h_ans=(unsigned short*)malloc(how_many_tickets * color_ball * sizeof(unsigned short));
+
+		//*******************************************
+		//			read data from csv file
+		//*******************************************
+		FILE *file=fopen("readme.csv","r");
+		int value=0, i=0;
+		while (fscanf(file, "%d%*c", &value) != EOF){
+			h_data[i]=value;
+			i++; 
+		}		
+		
+		//*******************************************
+		//			device variables
+		//*******************************************
+		unsigned short *d_ans, *d_data;
+		cudaMalloc((void**)&d_ans, sizeof(unsigned short)*how_many_tickets*color_ball);
+		cudaMalloc((void**)&d_data, sizeof(unsigned short)*how_many_tickets*color_ball);
+		cudaMemcpy(d_data, h_data, sizeof(unsigned short)*back_steps*number_check, cudaMemcpyHostToDevice);
+
+		//*******************************************
+		//			Invoke kernel
+		//*******************************************
+		unsigned short threadsPerBlock = 64;
+		unsigned short blocksPerThread = (how_many_tickets + threadsPerBlock - 1) / threadsPerBlock;
+		Lotto<<<blocksPerThread,threadsPerBlock>>>(d_data, d_ans);
+		cudaDeviceSynchronize();
+		
+		//*******************************************
+		//			output answers
+		//*******************************************
+		cudaMemcpy(h_ans, d_ans, sizeof(unsigned short)*how_many_tickets*color_ball, cudaMemcpyDeviceToHost);	
+		//for (i = 0; i < how_many_tickets*color_ball; i++)
+		//	printf("%d= %d\n",i,h_ans[i]);
+		
+		//*******************************************
+		//			release sources
+		//*******************************************
+        free(h_data);
+		free(h_ans);
+		cudaFree(d_ans);
+		cudaFree(d_data);
+		cudaDeviceReset();
+		
+		t2 = clock();
+		printf("%lf  secs\n", (t2-t1)/(double)(CLOCKS_PER_SEC));
+		return 0;
+	}
+}
