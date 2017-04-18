@@ -1,0 +1,109 @@
+#define MYMODEL Simulation_LSV_Data
+#define GPU_GET_PV_PORTF gpu_get_LSV_pv_portf
+#define GPU_GET_PV_UNIT gpu_get_LSV_pv_unit
+#define FREESIMULATOR free_simulator_lsv
+
+const char* exe_name = "fubon_gpu_lsv";
+double rounding(double num, int index);
+void my_model_cf(char* proj, char* k, MYMODEL *cf, TARN_spec** pcspec, TARN_state** pctarn, int** ppayoff){
+	int i, j;
+	
+	cf->kappa = (double*)malloc(cf->vol_num * sizeof(double));
+	cf->sigma = (double*)malloc(cf->vol_num * sizeof(double));	//vov
+	cf->rho = (double*)malloc(cf->vol_num * sizeof(double));
+	cf->cursor = (double*)malloc(cf->vol_num * sizeof(double));
+	cf->bs_var = (double*)malloc(cf->vol_num * sizeof(double));
+	cf->dt_num = (int*)malloc(cf->num_time_step * sizeof(int));
+	cf->num_height_per_tenor = MKT_PILLAR;
+	cf->heights = (double*)malloc(cf->vol_num * cf->num_height_per_tenor * sizeof(double));
+	cf->ln_strikes = (double*)malloc(cf->vol_num * cf->num_height_per_tenor * sizeof(double));		
+	cf->sigma_a=(double*)malloc(cf->vol_num * cf->num_height_per_tenor * sizeof(double));
+	cf->sigma_b=(double*)malloc(cf->vol_num * cf->num_height_per_tenor * sizeof(double));
+	
+	cf->tt_heights=(float*)malloc(cf->vol_num * cf->num_height_per_tenor * sizeof(float));
+	cf->tt_ln_strikes=(float*)malloc(cf->vol_num * cf->num_height_per_tenor * sizeof(float));
+	cf->tt_sigma_a=(float*)malloc(cf->vol_num * cf->num_height_per_tenor * sizeof(float));
+	cf->tt_sigma_b=(float*)malloc(cf->vol_num * cf->num_height_per_tenor * sizeof(float));
+	
+	for(i=cf->num_time_step-1; i>0; i--){
+		cf->dt_num[i] = (int) rounding(((cf->dt[i]-cf->dt[i-1])*365.0),0);		
+	}			
+	cf->dt_num[0] = (int) (cf->dt[0]*365);
+
+	
+#if DEBUG
+	cout << " =============LSV parameters============== " << endl;
+	for(i=0; i<cf->num_time_step; i++){
+		cout <<"cf->dt_num["<<i<<"] = "<<cf->dt_num[i]<<endl;
+	}
+#endif	
+	//heston part parameters
+	for(i=0; i<cf->vol_num; i++){
+		SOAP_get_double(&cf->kappa[i]); 
+		SOAP_get_double(&cf->bs_var[i]);
+		SOAP_get_double(&cf->sigma[i]);
+		SOAP_get_double(&cf->rho[i]);			
+	}
+	//LV part parameters
+	//double sqrtdt = 0.052342392259021368;// = sqrt(1.0/365.0);
+	for(i=0; i<cf->vol_num; i++){
+		int tmp_i = i * cf->num_height_per_tenor;
+		for (j=0; j<cf->num_height_per_tenor; j++) {
+			SOAP_get_double(&cf->heights[tmp_i + j]);		
+			SOAP_get_double(&cf->ln_strikes[tmp_i + j]);
+			//cf->heights[tmp_i + j] *= sqrtdt;		
+			
+			cf->tt_heights[tmp_i + j]=(float)cf->heights[tmp_i + j];
+			cf->tt_ln_strikes[tmp_i + j]=(float)cf->ln_strikes[tmp_i + j];
+		}
+		
+		int tt1 = i * cf->num_height_per_tenor;
+		int tt2 = i * (cf->num_height_per_tenor-1);
+	
+		for(int j=0; j<cf->num_height_per_tenor-1; j++){
+			cf->sigma_a[tt2 + j] = (cf->heights[tt1 + j+1] - cf->heights[tt1 + j]) / (cf->ln_strikes[tt1 + j+1] - cf->ln_strikes[tt1 + j]);
+			cf->sigma_b[tt2 + j] = cf->heights[tt1 + j] - cf->ln_strikes[tt1 + j] * cf->sigma_a[tt2 + j];
+			cf->tt_sigma_a[tt2 + j] =cf->sigma_a[tt2 + j] ;
+			cf->tt_sigma_b[tt2 + j] =cf->sigma_b[tt2 + j] ;
+		}
+	}
+
+#if DEBUG
+	for(i=0; i<cf->vol_num; i++){
+		cout <<"cf->kappa["<<i<<"] = "<<cf->kappa[i]<<endl;
+		cout <<"cf->bs_var["<<i<<"] = "<<cf->bs_var[i]<<endl;
+		cout <<"cf->sigma["<<i<<"] = "<<cf->sigma[i]<<endl;
+		cout <<"cf->rho["<<i<<"] = "<<cf->rho[i]<<endl;
+	}	
+	for(i=0; i<cf->vol_num; i++){
+		int tmp_i = i * cf->num_height_per_tenor;
+		for (j=0; j<cf->num_height_per_tenor; j++) {
+			cout <<"(i,j)=("<<i<<","<<j<<") heights="<< cf->heights[tmp_i + j] << endl;
+			cout <<"(i,j)=("<<i<<","<<j<<") ln_strikes="<<cf->ln_strikes[tmp_i + j] << endl;
+		}
+	}	
+#endif	
+
+	// get additional calibration information
+	if(cf->do_calibrate==1){
+		cout <<"WORKING ..."<<endl;
+		exit(0);
+	}
+}
+double inline rounding(double num, int index){
+    bool isNegative = false;
+	if(num < 0){
+        isNegative = true;	
+        num = -num;
+    }
+    if(index >= 0){
+        int multiplier;
+        multiplier = pow(10, index);
+        num = (int)(num * multiplier + 0.5) / (multiplier * 1.0);
+    }
+    if(isNegative){
+        num = -num;
+    }
+    return num;
+}
+
