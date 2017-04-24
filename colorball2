@@ -6,100 +6,210 @@
 #include <iostream>
 #include <time.h>
 
-__constant__ unsigned short ErrorType[15][3] = { { 3, 2, 0 }, { 3, 0, 2 }, { 2, 3, 0 }, { 2, 0, 3 }, { 0, 3, 2 }, { 0, 2, 3 },	{ 4, 1, 0 }, { 4, 0, 1 }, { 1, 4, 0 }, { 1, 0, 4 }, { 0, 4, 1 }, { 0, 1, 4 }, { 5, 0, 0 }, { 0, 5, 0 }, { 0, 0, 5 } };
+__constant__ int ErrorType[15][3] = { { 3, 0, 2 }, { 3, 2, 0 }, { 2, 3, 0 }, { 2, 0, 3 }, { 0, 3, 2 }, { 0, 2, 3 }, { 4, 1, 0 }, { 4, 0, 1 }, { 1, 4, 0 }, { 1, 0, 4 }, { 0, 4, 1 }, { 0, 1, 4 }, { 5, 0, 0 }, { 0, 5, 0 }, { 0, 0, 5 } };
 
-const unsigned short number_check=5;
-const unsigned short color_ball=39;
-
-__device__ inline void BodyGPU(unsigned short *d_data, unsigned short *local_ans, unsigned  abc){
+__device__ void BodyGPU(int *d_data, int *local_ans, int abc, int back_steps){
 	curandState s;
-	curand_init(1234, abc, 0, &s);
-	//for (unsigned short j = 0; j < color_ball; j++){
-		//local_ans[j]=abc*color_ball+j;
-		//local_ans[j]=ErrorType[short(curand_uniform(&s) * 15)][short(curand_uniform(&s) * 3)];
-	//}
-	unsigned short lineUse[3][13], CheckNumbers[5], tempContainer[39], UseTypeMaxNum = 15, local_row = 0, lineAddr[3];
-	
-	for (unsigned short i = 0; i < 3; i++){
-		lineAddr[i] = 0;
-		for (unsigned short j = 0; j < 13; j++){
-			lineUse[i][j] = 0;
-			tempContainer[i * 13 + j] = 0;
+	curand_init(clock64(), abc, 0, &s);
+	int result[39], lineUse[3], useType[3], CheckNumbers[5];
+	const int UseTypeMaxNum = 15;
+	bool FindFail = false;
+
+	do {
+		FindFail = false;
+		for (int i = 0; i < 39; i++) result[i] = 0;
+		lineUse[0] = 0 - 1;  lineUse[1] = 13 - 1;  lineUse[2] = 26 - 1;
+
+		//CorrectList is all info from pass X periods
+		for (int i = 0; i < back_steps && !FindFail; i++){
+			for (int j = 0; j < 5; j++)	CheckNumbers[j] = d_data[i * 5 + j];
+			
+			FindFail = true;
+			for (int useTypeTestTimes = 0; useTypeTestTimes < UseTypeMaxNum && FindFail; useTypeTestTimes++){
+				FindFail = false;
+				int useTypeIndex = int(curand_uniform(&s) * 15);
+
+				// Copy UseType
+				for (int j = 0; j < 3; j++) useType[j] = ErrorType[useTypeIndex][j];
+
+				// Minus UseType (若 result 裡已存在checkNumber的數字，則從checkNumber 移除)
+				for (int j = 0; j < 5; j++){
+					bool flat = false;
+					int ww = 0;
+					for (ww = 0; ww < 39; ww++){
+						if (result[ww] == CheckNumbers[j]){
+							flat = true;
+							break;
+						}
+					}
+					if (flat){
+						if (useType[ww % 3] == 0){
+							FindFail = true;
+							break;
+						}
+						else {
+							useType[ww % 3]--;
+							CheckNumbers[j] = 0;
+						}
+					}
+				}
+			}
+
+			// Random CheckNumber's Position.
+			for (int j = 0; j < 5; j++){
+				int swapIndex = int(curand_uniform(&s) * 5);
+				int swapTmp = CheckNumbers[j];
+				CheckNumbers[j] = CheckNumbers[swapIndex];
+				CheckNumbers[swapIndex] = swapTmp;
+			}
+
+			for (int k = 0; k < 5 && !FindFail; k++){
+				if (CheckNumbers[k] != 0){
+					for (int j = 0; j < 3 && !FindFail; j++){
+						if (useType[j] != 0){
+							/// add flag with line use is full or not.
+							if (lineUse[j] < (j + 1) * 13 - 1){
+								lineUse[j]++;  useType[j]--;
+								result[lineUse[j]] = CheckNumbers[k];
+								break;
+							}
+							else FindFail = true;
+						}
+					}
+				}
+			}
 		}
-	}
-	
+
+		// set other number to result.
+		if (!FindFail){
+			for (int i = 1; i <= 39; i++){
+				bool flat = false;
+				for (int j = 0; j < 39; j++){
+					if (result[j] == i){
+						flat = true;
+						break;
+					}
+				}
+
+				if (!flat){
+					while (true){
+						int putLine = int(curand_uniform(&s) * 3);
+						if (lineUse[putLine] >= (putLine + 1) * 13 - 1) putLine = int(curand_uniform(&s) * 3);
+						if (lineUse[putLine] >= (putLine + 1) * 13 - 1) putLine = 0;
+						if (lineUse[putLine] >= (putLine + 1) * 13 - 1) putLine = 1;
+						if (lineUse[putLine] >= (putLine + 1) * 13 - 1) putLine = 2;
+
+						lineUse[putLine]++;
+						result[lineUse[putLine]] = i;
+						break;
+					}
+				}
+			}
+		}
+	} while (FindFail);
+
+	for (int i = 0; i < 3; i++)
+		for (int j = 0; j < 13; j++)
+			local_ans[i * 13 + j] = result[i * 13 + j];
 }
-		
-__global__ void Lotto(unsigned short *d_data, unsigned short *d_ans){
-	unsigned  abc = blockDim.x * blockIdx.x + threadIdx.x;
-	BodyGPU( d_data,&(d_ans[abc* color_ball]),abc);
+
+__global__ void Lotto(int *d_data, int *d_ans, int back_steps){
+	int  abc = blockDim.x * blockIdx.x + threadIdx.x;
+	BodyGPU(d_data, &(d_ans[abc* 39]), abc, back_steps);
 }
-		
+
 int main(int argc, char* argv[]){
 	if (argc != 3)
 		return 0;
 	else{
 		clock_t t1, t2;
 		t1 = clock();
-		
+
 		//*******************************************
 		//			read arguments
 		//*******************************************
 		char *p;
-		unsigned int back_steps = strtol(argv[1], &p, 10);
-		unsigned int how_many_tickets = strtol(argv[2], &p, 10);
+		int back_steps = strtol(argv[1], &p, 10);
+		int how_many_tickets = strtol(argv[2], &p, 10);
 		if (how_many_tickets>10000000) return 0;
+
 		//*******************************************
 		//			host variables
 		//*******************************************
-		unsigned short *h_data,*h_ans;	
-		h_data=(unsigned short*)malloc(back_steps * number_check * sizeof(unsigned short));
-		h_ans=(unsigned short*)malloc(how_many_tickets * color_ball * sizeof(unsigned short));
-
+		int *h_data, *h_ans;
+		h_data = (int*)malloc(back_steps * 5 * sizeof(int));
+		h_ans = (int*)malloc(how_many_tickets * 39 * sizeof(int));
+		//printf("%d\n", back_steps * number_check);
+		//printf("%d\n", how_many_tickets * color_ball);
 		//*******************************************
 		//			read data from csv file
 		//*******************************************
-		FILE *file=fopen("readme.csv","r");
-		int value=0, i=0;
+		FILE *file = fopen("C:\\Users\\jayhsieh\\Desktop\\程式碼\\para\\readme.csv", "r");
+		int value = 0, i = 0;
 		while (fscanf(file, "%d%*c", &value) != EOF){
-			h_data[i]=value;
-			i++; 
-		}		
+			h_data[i] = value;
+			i++;
+			if (i >= back_steps * 5) break;
+			//printf("%d\n", i);
+		}
 		
+		/*for (i = 0; i < back_steps * number_check; i++)
+			printf("%d= %d\n", i, h_data[i]);*/
+		//printf("read data from csv file\n");
 		//*******************************************
 		//			device variables
 		//*******************************************
-		unsigned short *d_ans, *d_data;
-		cudaMalloc((void**)&d_ans, sizeof(unsigned short)*how_many_tickets*color_ball);
-		cudaMalloc((void**)&d_data, sizeof(unsigned short)*how_many_tickets*color_ball);
-		cudaMemcpy(d_data, h_data, sizeof(unsigned short)*back_steps*number_check, cudaMemcpyHostToDevice);
-
+		int *d_ans, *d_data;
+		cudaMalloc((void**)&d_ans, sizeof(int)*how_many_tickets*39);
+		cudaMalloc((void**)&d_data, sizeof(int)*how_many_tickets*39);
+		cudaMemcpy(d_data, h_data, sizeof(int)*back_steps*5, cudaMemcpyHostToDevice);
+		//printf("device variables\n");
 		//*******************************************
 		//			Invoke kernel
 		//*******************************************
-		unsigned short threadsPerBlock = 64;
-		unsigned short blocksPerThread = (how_many_tickets + threadsPerBlock - 1) / threadsPerBlock;
-		Lotto<<<blocksPerThread,threadsPerBlock>>>(d_data, d_ans);
+		int threadsPerBlock = 256;
+		int blocksPerThread = (how_many_tickets + threadsPerBlock - 1) / threadsPerBlock;
+		Lotto << <blocksPerThread, threadsPerBlock >> >(d_data, d_ans, back_steps);
 		cudaDeviceSynchronize();
-		
+		//printf("Invoke kernel\n");
 		//*******************************************
 		//			output answers
 		//*******************************************
-		cudaMemcpy(h_ans, d_ans, sizeof(unsigned short)*how_many_tickets*color_ball, cudaMemcpyDeviceToHost);	
-		//for (i = 0; i < how_many_tickets*color_ball; i++)
-		//	printf("%d= %d\n",i,h_ans[i]);
-		
+		cudaMemcpy(h_ans, d_ans, sizeof(int)*how_many_tickets*39, cudaMemcpyDeviceToHost);
+
+		FILE *f = fopen("output.csv", "w");
+		fprintf(f, "Sheet #,Line 1,,,,,,,,,,,,,Line 2,,,,,,,,,,,,,Line 3\n");
+		int j = 0;
+		for (j = 0; j < how_many_tickets; j++){
+			if (j > 0){
+				fprintf(f, "\n");
+				//printf("\n");
+			}
+			fprintf(f, "%d", j + 1);
+			//printf("%d", j + 1);
+
+			for (i = 0; i < 39; i++){
+				fprintf(f, ",%d", h_ans[j * 39 + i]);
+				//printf(",%d", h_ans[j * 39 + i]);
+			}
+		}
+		fclose(f);
 		//*******************************************
 		//			release sources
 		//*******************************************
-        free(h_data);
-		free(h_ans);
 		cudaFree(d_ans);
 		cudaFree(d_data);
 		cudaDeviceReset();
-		
+
 		t2 = clock();
-		printf("%lf  secs\n", (t2-t1)/(double)(CLOCKS_PER_SEC));
+		FILE *f1 = fopen("performance.txt", "a");
+		fprintf(f1, "\n======================\n");
+		fprintf(f1, "連X=%d \n", back_steps);
+		fprintf(f1, "產生 %d 筆單\n", how_many_tickets);
+		fprintf(f1, "總花費 %lf 秒", (t2 - t1) / (double)(CLOCKS_PER_SEC));
+		fclose(f1);
+
+		printf("\n\n%lf  secs\n", (t2 - t1) / (double)(CLOCKS_PER_SEC));
 		return 0;
 	}
 }
