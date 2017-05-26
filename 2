@@ -1,0 +1,946 @@
+using System.Threading;
+using System.Collections;
+using System;
+using System.Collections.Generic;
+using System.Data.Odbc;
+using jayhsieh.Quant;
+using System.Linq;
+
+namespace Fx {
+    /// <summary>
+    /// Black sholes model.
+    /// </summary>
+    public class Program {
+        private static string middleware, schema;
+        private static string inTableName;
+        private static string Ccys;
+        private static string NotionalCcy;
+        private static double[] spot = new double[2];
+        private static DateTime today;
+        private static DateTime exDate;
+        private static DateTime delDate;
+        private static double strike;
+        private static payoff st;
+        private static BSModel2.buysell buysell;
+        private static bool time_interpolation = true;
+        // mid vol curve
+        private static string[][] tk_sp = new string[1][];
+        private static string[] tk_usddepo;
+        private static double[][][] sp = new double[1][][];
+        private static double[][] depo = new double[2][];
+        private static double[][,] vol = new double[2][,];
+        private static double spot_m;
+        /// <summary>
+        /// default weight
+        /// </summary>
+        private static double[] weight = new double[7] { 0.2, 1, 1, 1, 1, 1, 0.2 };
+        private static List<DateTime> da = new List<DateTime>();
+        private static List<double> wei = new List<double>();
+        private static BSModel2 volCurve = new BSModel2();
+        private static List<DateTime> tk = new List<DateTime>();
+        private static List<string> tks = new List<string>();
+        private static double[] deltaSet = new double[1];
+        private static string ordll_connectionstring;
+        private static string[] reader;
+        private static ArrayList str2;
+        /// <summary>
+        /// DCI doesn't use Murex T/N rule
+        /// </summary>
+        private static bool MX_TN_rule = false;
+
+        private static OdbcCommand command;
+        private static OdbcTransaction Transaction;
+        private static OdbcConnection connection;
+        private static string CommandText;
+
+        private static void open_odbc(string conn) {
+            if (connection == null) connection = new OdbcConnection(conn);
+            command = new OdbcCommand();
+            connection.Open();
+            command.Connection = connection;
+        }
+        /// <summary>
+        /// for multiple fields with only one record
+        /// </summary>
+        /// <param name="value"></param>
+        private static void ExecuteReader(ref string[] value) {
+            command.CommandText = CommandText;
+            OdbcDataReader dbreader = command.ExecuteReader();
+            value = new string[dbreader.FieldCount];
+            if (dbreader.Read()) {
+                for (int j = 0; j < value.Length; j++) {
+                    value[j] = Convert.ToString(dbreader[j]);
+                }
+            }
+            dbreader.Close();
+        }
+
+        private static void ExecuteReader(ref ArrayList vv) {
+            try {
+                if (vv == null) {
+                    vv = new ArrayList();
+                } else {
+                    vv.Clear();
+                }
+                command.CommandText = CommandText;
+                OdbcDataReader dbreader = command.ExecuteReader();
+
+                while (dbreader.Read()) {
+                    string[] rr = new string[dbreader.FieldCount];
+                    for (int j = 0; j < rr.Length; j++) {
+                        rr[j] = Convert.ToString(dbreader[j]);
+                    }
+                    vv.Add(rr);
+                    rr = null;
+                }
+                dbreader.Close();
+            } catch (Exception ex) {
+                throw new Exception("Fail to Execute SQL: " + ex.Message);
+            }
+        }
+        private static void close_odbc() {
+            command = null;
+            connection.Close();
+            connection = null;
+        }
+        private static void ExecuteNonQuery() {
+            try {
+                command.CommandText = CommandText;
+                command.ExecuteNonQuery();
+            } catch (Exception ex) {
+                throw new Exception("Fail to ExecuteNonQuery SQL: " + ex.Message);
+            }
+        }
+        private static void BeginTransaction() {
+            Transaction = connection.BeginTransaction();
+            command.Transaction = Transaction;
+        }
+        private static void TransactionCommit() {
+            Transaction.Commit();
+        }
+
+        private static void query_mkt(int id) {
+            int i, j;
+            List<double>[] fxv_b = new List<double>[2];
+            List<double>[] fxv_a = new List<double>[2];
+            List<string> temp_sp = new List<string>();
+            List<double> temp_b = new List<double>();
+            List<double> temp_a = new List<double>();
+
+            sp[0] = new double[2][];
+
+            CommandText = "SELECT count(BID)/2 from " + schema + "." + middleware + " WHERE ID=" + id + " AND SUBSTR(Name,0,1)='V'";
+            ExecuteReader(ref reader);
+            deltaSet = new double[Convert.ToInt16(reader[0])];
+
+            CommandText = "SELECT BID,ASK,IDX,SubStr(NAME,2,Length(NAME))  from    " + schema + "." + middleware + " WHERE ID=" + id + " AND SUBSTR(Name,0,1)='V' ORDER BY ORD ASC";
+            ExecuteReader(ref str2);
+            fxv_b[0] = new List<double>();
+            fxv_b[1] = new List<double>();
+            fxv_a[0] = new List<double>();
+            fxv_a[1] = new List<double>();
+            i = 0;
+            j = 0;
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                if (tks.Count != 0 && tks[i] != Convert.ToString(reader[2]).ToLower()) {
+                    i++;
+                    tks.Add(Convert.ToString(reader[2]).ToLower());
+                } else if (tks.Count == 0) {
+                    tks.Add(Convert.ToString(reader[2]).ToLower());
+                    deltaSet[j] = Convert.ToDouble(reader[3]) / 100.0;
+                } else if (tks.Count == 1) {
+                    deltaSet[j] = Convert.ToDouble(reader[3]) / 100.0;
+                }
+                fxv_b[i].Add(Convert.ToDouble(reader[0]));
+                fxv_a[i].Add(Convert.ToDouble(reader[1]));
+                j++;
+            }
+
+
+
+            CommandText = "SELECT EXPIRY_DATE FROM " + schema + ".DCDPRICEEXPIRYDATE WHERE ccys='" + Ccys + "'  AND (tenor='" + tks[0].ToUpper() + "' OR tenor='" + tks[1].ToUpper() + "') ORDER BY expiry_date asc";
+            ExecuteReader(ref str2);
+            for (i = 0; i < str2.Count; i++) {
+                reader = (string[])str2[i];
+                tk.Add(Convert.ToDateTime(reader[0]));
+            }
+
+
+            CommandText = "SELECT BID, ASK, IDX FROM " + middleware + " WHERE ID=" + id + " AND NAME='swapPoint' ORDER BY ORD ASC";
+            ExecuteReader(ref str2);
+            temp_sp.Clear();
+            temp_b.Clear();
+            temp_a.Clear();
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                temp_sp.Add(Convert.ToString(reader[2]).ToLower());
+                temp_b.Add(Convert.ToDouble(reader[0]) / spot_m);
+                temp_a.Add(Convert.ToDouble(reader[1]) / spot_m);
+            }
+
+            tk_sp[0] = temp_sp.ToArray();
+            sp[0][0] = temp_b.ToArray();
+            sp[0][1] = temp_a.ToArray();
+
+            CommandText = "SELECT BID, ASK, IDX FROM " + middleware + " WHERE ID=" + id + " AND NAME='depoRate' ORDER BY ORD ASC";
+            ExecuteReader(ref str2);
+            temp_sp.Clear();
+            temp_b.Clear();
+            temp_a.Clear();
+
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                temp_sp.Add(Convert.ToString(reader[2]).ToLower());
+                temp_b.Add(Convert.ToDouble(reader[0]));
+                temp_a.Add(Convert.ToDouble(reader[1]));
+            }
+
+            tk_usddepo = temp_sp.ToArray();
+            depo[0] = temp_b.ToArray();
+            depo[1] = temp_a.ToArray();
+
+            // week weight
+            CommandText = "SELECT * FROM (SELECT M_MO_WEIGHT, M_TU_WEIGHT, M_WD_WEIGHT, M_TH_WEIGHT, M_FR_WEIGHT, M_WE_WEIGHT FROM " + schema + ".MPX_WNEW_DBF WHERE  (M_GROUP='" + Ccys.Replace("/", "") + "' OR M_GROUP='" + Ccys + "' ) order by m_date desc, m_index_ desc) WHERE ROWNUM=1";
+            ExecuteReader(ref reader);
+
+            weight[1] = Convert.ToDouble(reader[0]);
+            weight[2] = Convert.ToDouble(reader[1]);
+            weight[3] = Convert.ToDouble(reader[2]);
+            weight[4] = Convert.ToDouble(reader[3]);
+            weight[5] = Convert.ToDouble(reader[4]);
+            weight[6] = Convert.ToDouble(reader[5]);
+            weight[0] = Convert.ToDouble(reader[5]);
+            if (weight[0] + weight[1] + weight[2] + weight[3] + weight[4] + weight[5] + weight[6] == 0) {
+                weight[0] = 1;
+                weight[1] = 1;
+                weight[2] = 1;
+                weight[3] = 1;
+                weight[4] = 1;
+                weight[5] = 1;
+                weight[6] = 1;
+            }
+
+
+            // event weight user specific date, weight            
+
+            CommandText = "SELECT  MPY_WNEW_DBF.M_EVENT_DATE, MPY_WNEW_DBF.M_ALPHA_EVENT , MPY_WNEW_DBF.M_EV_TEMPPR ,MPY_WNEW_DBF.M_INDEX_    FROM MPY_WNEW_DBF, (SELECT M_INDEX_ FROM ( SELECT MPY_WNEW_DBF.M_EVENT_DATE,MPY_WNEW_DBF.M_ALPHA_EVENT ,MPY_WNEW_DBF.M_EV_TEMPPR ,MPY_WNEW_DBF.M_INDEX_ FROM " + schema + ".MPY_WNEW_DBF, (   SELECT M_INDEX_ FROM (   SELECT M_INDEX_ FROM " + schema + ".MPX_WNEW_DBF WHERE (M_GROUP='" + Ccys.Replace("/", "") + "' OR M_GROUP='" + Ccys + "' ) ORDER by M_INDEX_ desc   )  WHERE  ROWNUM=1  ) aa WHERE MPY_WNEW_DBF.M_INDEX_=aa.M_INDEX_ AND M_ALPHA_EVENT<>0 AND TO_CHAR(M_EVENT_DATE, 'YYYY/MM/DD')>'" + dateformat_convert(today).Replace("-", "/") + "' ORDER BY MPY_WNEW_DBF.M_INDEX_ DESC) WHERE ROWNUM=1 ) tt  WHERE tt. M_INDEX_= MPY_WNEW_DBF.M_INDEX_ AND M_ALPHA_EVENT<>0 AND TO_CHAR(M_EVENT_DATE, 'YYYY/MM/DD')>'" + dateformat_convert(today).Replace("-", "/") + "'";
+            ExecuteReader(ref str2);
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                da.Add(Convert.ToDateTime(reader[0]));
+                wei.Add(Convert.ToDouble(reader[1]));
+            }
+
+            // event weight by template                          
+            CommandText = "SELECT  b.M_EV_DATE, b. M_EV_WEIGHT  from  " + schema + ".EV_TEMP_DBF b,(SELECT DISTINCT(b.M_IDENTITY) from (  select  a.M_EV_DATE,a.rr from( select b.* from ( select M_EV_DATE, min(RR) as rr from ( SELECT  M_EV_DATE,M_INDEX_,min(rr) as rr FROM " + schema + ".short_date_cal WHERE ccys='" + Ccys.Replace("/", "") + "' and  TO_CHAR( M_EV_DATE, 'YYYY/MM/DD')>'" + dateformat_convert(today).Replace("-", "/") + "'  and  TO_CHAR( M_EV_DATE, 'YYYY/MM/DD')<='" + dateformat_convert(tk[1]).Replace("-", "/") + "' GROUP BY (M_EV_DATE,M_INDEX_) ORDER BY   M_EV_DATE  ASC ) a group by M_EV_DATE) a, (SELECT  M_EV_DATE,M_INDEX_,min(rr) as rr FROM " + schema + ".short_date_cal WHERE ccys='" + Ccys.Replace("/", "") + "' and  TO_CHAR( M_EV_DATE, 'YYYY/MM/DD')>'" + dateformat_convert(today).Replace("-", "/") + "' and  TO_CHAR( M_EV_DATE, 'YYYY/MM/DD')<='" + dateformat_convert(tk[1]).Replace("-", "/") + "' GROUP BY (M_EV_DATE,M_INDEX_) ORDER BY   M_EV_DATE  ASC ) b where a.m_ev_date=b.m_ev_date and a.rr=b.rr) a,MPY_WNEW_DBF b where b.M_INDEX_=a.M_INDEX_  ) a,   " + schema + ".short_date_cal  b WHERE a.rr=b.rr AND b.ccys='" + Ccys.Replace("/", "") + "' AND a.M_EV_DATE=b.M_EV_DATE) a WHERE a.M_IDENTITY=b.M_IDENTITY ORDER BY b.M_EV_DATE asc";
+            ExecuteReader(ref str2);
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                da.Add(Convert.ToDateTime(reader[0]));
+                wei.Add(Convert.ToDouble(reader[1]));
+            }
+
+
+            vol[0] = new double[2, fxv_a[0].Count];
+            vol[1] = new double[2, fxv_a[0].Count];
+
+            for (i = 0; i < fxv_a[0].Count; i++) {
+                vol[0][0, i] = fxv_b[0][i];
+                vol[0][1, i] = fxv_b[1][i];
+                vol[1][0, i] = fxv_a[0][i];
+                vol[1][1, i] = fxv_a[1][i];
+            }
+        }
+        private static void query_mkt_c(int id) {
+            int i, j;
+            double[] ss = new double[2];
+            tk_sp = new string[2][];
+            List<double>[] fxv_b = new List<double>[2];
+            List<double>[] fxv_a = new List<double>[2];
+            List<string> temp_sp = new List<string>();
+            List<double> temp_b = new List<double>();
+            List<double> temp_a = new List<double>();
+            sp = new double[2][][];
+            sp[0] = new double[2][];
+            sp[1] = new double[2][];
+
+            CommandText = "SELECT count(BID)/2 from " + schema + "." + middleware + " WHERE ID=" + id + " AND SUBSTR(Name,0,1)='V'";
+            ExecuteReader(ref reader);
+            deltaSet = new double[Convert.ToInt16(reader[0])];
+
+            CommandText = "SELECT BID,ASK,IDX,SubStr(NAME,2,Length(NAME))  from    " + schema + "." + middleware + " WHERE ID=" + id + " AND SUBSTR(Name,0,1)='V' ORDER BY ORD ASC";
+            ExecuteReader(ref str2);
+            fxv_b[0] = new List<double>();
+            fxv_b[1] = new List<double>();
+            fxv_a[0] = new List<double>();
+            fxv_a[1] = new List<double>();
+            i = 0;
+            j = 0;
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                if (tks.Count != 0 && tks[i] != Convert.ToString(reader[2]).ToLower()) {
+                    i++;
+                    tks.Add(Convert.ToString(reader[2]).ToLower());
+                } else if (tks.Count == 0) {
+                    tks.Add(Convert.ToString(reader[2]).ToLower());
+                    deltaSet[j] = Convert.ToDouble(reader[3]) / 100.0;
+                } else if (tks.Count == 1) {
+                    deltaSet[j] = Convert.ToDouble(reader[3]) / 100.0;
+                }
+                fxv_b[i].Add(Convert.ToDouble(reader[0]));
+                fxv_a[i].Add(Convert.ToDouble(reader[1]));
+                j++;
+            }
+
+            CommandText = "SELECT EXPIRY_DATE FROM " + schema + ".DCDPRICEEXPIRYDATE WHERE ccys='" + Ccys + "'  AND (tenor='" + tks[0].ToUpper() + "' OR tenor='" + tks[1].ToUpper() + "') ORDER BY expiry_date asc";
+            ExecuteReader(ref str2);
+            for (i = 0; i < str2.Count; i++) {
+                reader = (string[])str2[i];
+                tk.Add(Convert.ToDateTime(reader[0]));
+            }
+
+            CommandText = "SELECT (BID+ASK)/2.0 FROM " + middleware + " WHERE ID=" + id + " AND ( NAME='xspot')  ORDER BY name asc";
+            ExecuteReader(ref reader);
+            ss[0] = Convert.ToDouble(reader[0]);
+
+            CommandText = "SELECT (BID+ASK)/2.0 FROM " + middleware + " WHERE ID=" + id + " AND ( NAME='yspot')  ORDER BY name asc";
+            ExecuteReader(ref reader);
+            ss[1] = Convert.ToDouble(reader[0]);
+
+            CommandText = "SELECT BID, ASK, IDX FROM " + middleware + " WHERE ID=" + id + " AND NAME='swapPoint' ORDER BY ORD ASC";
+            ExecuteReader(ref str2);
+            temp_sp.Clear();
+            temp_b.Clear();
+            temp_a.Clear();
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                temp_sp.Add(Convert.ToString(reader[2]).ToLower());
+                temp_b.Add(Convert.ToDouble(reader[0]) / ss[0]);
+                temp_a.Add(Convert.ToDouble(reader[1]) / ss[0]);
+            }
+
+
+            tk_sp[0] = temp_sp.ToArray();
+            sp[0][0] = temp_b.ToArray();
+            sp[0][1] = temp_a.ToArray();
+
+            CommandText = "SELECT BID, ASK, IDX FROM " + middleware + " WHERE ID=" + id + " AND NAME='cswapPoint' ORDER BY ORD ASC";
+            ExecuteReader(ref str2);
+            temp_sp.Clear();
+            temp_b.Clear();
+            temp_a.Clear();
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                temp_sp.Add(Convert.ToString(reader[2]).ToLower());
+                temp_b.Add(Convert.ToDouble(reader[0]) / ss[1]);
+                temp_a.Add(Convert.ToDouble(reader[1]) / ss[1]);
+            }
+
+            tk_sp[1] = temp_sp.ToArray();
+            sp[1][0] = temp_b.ToArray();
+            sp[1][1] = temp_a.ToArray();
+
+            CommandText = "SELECT BID, ASK, IDX FROM " + middleware + " WHERE ID=" + id + " AND NAME='depoRate' ORDER BY ORD ASC";
+            ExecuteReader(ref str2);
+            temp_sp.Clear();
+            temp_b.Clear();
+            temp_a.Clear();
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                temp_sp.Add(Convert.ToString(reader[2]).ToLower());
+                temp_b.Add(Convert.ToDouble(reader[0]));
+                temp_a.Add(Convert.ToDouble(reader[1]));
+            }
+
+            tk_usddepo = temp_sp.ToArray();
+            depo[0] = temp_b.ToArray();
+            depo[1] = temp_a.ToArray();
+
+            // week weight            
+            CommandText = "SELECT * from (SELECT M_MO_WEIGHT, M_TU_WEIGHT, M_WD_WEIGHT, M_TH_WEIGHT, M_FR_WEIGHT, M_WE_WEIGHT FROM " + schema + ".MPX_WNEW_DBF WHERE  (M_GROUP='" + Ccys.Replace("/", "") + "' OR M_GROUP='" + Ccys + "' ) order by m_date desc, m_index_ desc) WHERE ROWNUM=1";
+            ExecuteReader(ref reader);
+            weight[1] = Convert.ToDouble(reader[0]);
+            weight[2] = Convert.ToDouble(reader[1]);
+            weight[3] = Convert.ToDouble(reader[2]);
+            weight[4] = Convert.ToDouble(reader[3]);
+            weight[5] = Convert.ToDouble(reader[4]);
+            weight[6] = Convert.ToDouble(reader[5]);
+            weight[0] = Convert.ToDouble(reader[5]);
+            if (weight[0] + weight[1] + weight[2] + weight[3] + weight[4] + weight[5] + weight[6] == 0) {
+                weight[0] = 1;
+                weight[1] = 1;
+                weight[2] = 1;
+                weight[3] = 1;
+                weight[4] = 1;
+                weight[5] = 1;
+                weight[6] = 1;
+            }
+
+            // event weight user specific date, weight            
+            CommandText = "SELECT  MPY_WNEW_DBF.M_EVENT_DATE, MPY_WNEW_DBF.M_ALPHA_EVENT , MPY_WNEW_DBF.M_EV_TEMPPR ,MPY_WNEW_DBF.M_INDEX_    FROM MPY_WNEW_DBF, (SELECT M_INDEX_ FROM ( SELECT MPY_WNEW_DBF.M_EVENT_DATE,MPY_WNEW_DBF.M_ALPHA_EVENT ,MPY_WNEW_DBF.M_EV_TEMPPR ,MPY_WNEW_DBF.M_INDEX_ FROM " + schema + ".MPY_WNEW_DBF, (   SELECT M_INDEX_ FROM (   SELECT M_INDEX_ FROM " + schema + ".MPX_WNEW_DBF WHERE (M_GROUP='" + Ccys.Replace("/", "") + "' OR M_GROUP='" + Ccys + "' ) ORDER by M_INDEX_ desc   )  WHERE  ROWNUM=1  ) aa WHERE MPY_WNEW_DBF.M_INDEX_=aa.M_INDEX_ AND M_ALPHA_EVENT<>0 AND TO_CHAR(M_EVENT_DATE, 'YYYY/MM/DD')>'" + dateformat_convert(today).Replace("-", "/") + "' ORDER BY MPY_WNEW_DBF.M_INDEX_ DESC) WHERE ROWNUM=1 ) tt  WHERE tt. M_INDEX_= MPY_WNEW_DBF.M_INDEX_ AND M_ALPHA_EVENT<>0 AND TO_CHAR(M_EVENT_DATE, 'YYYY/MM/DD')>'" + dateformat_convert(today).Replace("-", "/") + "'";
+            ExecuteReader(ref str2);
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                da.Add(Convert.ToDateTime(reader[0]));
+                wei.Add(Convert.ToDouble(reader[1]));
+            }
+
+            // event weight by template                                                
+            CommandText = "SELECT  b.M_EV_DATE, b. M_EV_WEIGHT  from  " + schema + ".EV_TEMP_DBF b,(SELECT DISTINCT(b.M_IDENTITY) from (  select  a.M_EV_DATE,a.rr from( select b.* from ( select M_EV_DATE, min(RR) as rr from ( SELECT  M_EV_DATE,M_INDEX_,min(rr) as rr FROM " + schema + ".short_date_cal WHERE ccys='" + Ccys.Replace("/", "") + "' and  TO_CHAR( M_EV_DATE, 'YYYY/MM/DD')>'" + dateformat_convert(today).Replace("-", "/") + "'  and  TO_CHAR( M_EV_DATE, 'YYYY/MM/DD')<='" + dateformat_convert(tk[1]).Replace("-", "/") + "' GROUP BY (M_EV_DATE,M_INDEX_) ORDER BY   M_EV_DATE  ASC ) a group by M_EV_DATE) a, (SELECT  M_EV_DATE,M_INDEX_,min(rr) as rr FROM " + schema + ".short_date_cal WHERE ccys='" + Ccys.Replace("/", "") + "' and  TO_CHAR( M_EV_DATE, 'YYYY/MM/DD')>'" + dateformat_convert(today).Replace("-", "/") + "' and  TO_CHAR( M_EV_DATE, 'YYYY/MM/DD')<='" + dateformat_convert(tk[1]).Replace("-", "/") + "' GROUP BY (M_EV_DATE,M_INDEX_) ORDER BY   M_EV_DATE  ASC ) b where a.m_ev_date=b.m_ev_date and a.rr=b.rr) a,MPY_WNEW_DBF b where b.M_INDEX_=a.M_INDEX_  ) a,   " + schema + ".short_date_cal  b WHERE a.rr=b.rr AND b.ccys='" + Ccys.Replace("/", "") + "' AND a.M_EV_DATE=b.M_EV_DATE) a WHERE a.M_IDENTITY=b.M_IDENTITY ORDER BY b.M_EV_DATE asc";
+            ExecuteReader(ref str2);
+            for (int ii = 0; ii < str2.Count; ii++) {
+                reader = (string[])str2[ii];
+                da.Add(Convert.ToDateTime(reader[0]));
+                wei.Add(Convert.ToDouble(reader[1]));
+            }
+
+            vol[0] = new double[2, fxv_a[0].Count];
+            vol[1] = new double[2, fxv_a[0].Count];
+
+            for (i = 0; i < fxv_a[0].Count; i++) {
+                vol[0][0, i] = fxv_b[0][i];
+                vol[0][1, i] = fxv_b[1][i];
+                vol[1][0, i] = fxv_a[0][i];
+                vol[1][1, i] = fxv_a[1][i];
+            }
+        }
+        /// <summary>
+        /// id 是單號
+        /// </summary>
+        /// <param name="id"></param>
+        private static void get_market_quote(int id) {
+            double amount = 0.0, dir, time_int;
+            bool ischeckwei = false; // check weight and discount factor
+            int conn_num = 0;
+            string interpolateMode = "Spreads"; // Spread ro Volatility
+            string extrapolateMode = "Linear"; // Flat, Linear(Murex default) or Extrapolate            
+            bool isdo = false;
+            double temp;
+            double[] ans;
+            DateTime spotDate = new DateTime();
+            string dwei = "";
+
+            while (!isdo) {
+                try {
+                    open_odbc(ordll_connectionstring);
+                    CommandText = "select id, ccys, nccy, spot, spotrd, spotrf, delrd, delrf, today, spotdate, exdate, deldate, strike, stgy, amount,spot_m,D5DP  from " + schema + "." + inTableName + " where id=" + id;
+                    ExecuteReader(ref reader);
+                    Ccys = Convert.ToString(reader[1]);
+                    NotionalCcy = Convert.ToString(reader[2]);
+                    temp = Convert.ToDouble(reader[3]); //spot
+                    today = Convert.ToDateTime(reader[8]);
+                    spotDate = Convert.ToDateTime(reader[9]);
+                    exDate = Convert.ToDateTime(reader[10]);
+                    delDate = Convert.ToDateTime(reader[11]);
+                    strike = Convert.ToDouble(reader[12]);
+                    st = strategy.string_to_payoff(Convert.ToString(reader[13]));
+                    amount = Convert.ToDouble(reader[14]);
+                    spot_m = Convert.ToDouble(reader[15]); //market spot
+                    dir = Convert.ToDouble(reader[4]); //方向
+                    time_int = Convert.ToDouble(reader[5]);  //時間_內插
+                    if (reader[16] != "") {
+                        ischeckwei = true;
+                    }
+
+
+                    time_int = Convert.ToDouble(reader[5]);
+                    if (dir > 0) {
+                        buysell = BSModel2.buysell.buy;
+                    } else {
+                        buysell = BSModel2.buysell.sell;
+                    }
+
+                    if (time_int > 0) {
+                        time_interpolation = true;
+                    } else {
+                        time_interpolation = false;
+                    }
+
+                    if (temp > spot_m) {
+                        spot[1] = temp;
+                        spot[0] = spot_m * 2 - temp;
+                    } else {
+                        spot[0] = temp;
+                        spot[1] = spot_m * 2 - temp;
+                    }
+                    if (!Ccys.Contains("USD")) query_mkt_c(id);
+                    else query_mkt(id);
+
+                    close_odbc();
+
+                    isdo = true;
+                } catch (Exception ex) {
+                    Console.WriteLine("The last command Text: " + CommandText);
+                    Console.WriteLine("Oracel DB: " + ex.Message);
+                    Thread.Sleep(100);
+                    close_odbc();
+                    conn_num++;
+                    if (conn_num > 50) throw new Exception("Cannot connect to DB.");
+                }
+            }
+            if (tk[1] < exDate) {
+                Console.WriteLine("");
+                Console.WriteLine("ERROR! Please update Murex vol datein table, DCDPRICEEXPIRYDATE ccys=" + Ccys + ", Product exp date:" + exDate.ToShortDateString() + "  Mx vol date[1]:" + tk[1].ToShortDateString());
+                Environment.Exit(0);
+            }
+
+            volCurve.init_market(today, depo, tk_usddepo, sp, tk_sp, vol, spot, deltaSet, Ccys, time_interpolation, weight, "Others", da.ToArray(), wei.ToArray(), ref interpolateMode, ref extrapolateMode, MX_TN_rule, tk.ToArray());
+
+            //===================
+            // This is for next generation
+            // volCurve.init_market(today, depo, tk_usddepo_tenor, tk_usddepo, sp, tk_sp_tenor, tk_sp, vol, spot, deltaSet, Ccys, true, weight, tk.ToArray(), "Others", da.ToArray(), wei.ToArray(), ref interpolateMode, ref extrapolateMode);
+            //===================
+
+            ans = volCurve.quotepricebydate(buysell, st, strike, amount, NotionalCcy, exDate, delDate, spotDate);
+            if (ischeckwei) {
+                DateTime[] dkey = volCurve.bizDays.Keys.ToArray();
+                Double[] ditem = volCurve.bizDays.Values.ToArray();
+                fxVolSurf tmp_M;
+                string vol_ba = "";
+                double[] bid_vol =new double[5];
+                double[] mid_vol = new double[5];
+                double tmp;
+                double dt = (volCurve.specDate.ToOADate() - volCurve.now.ToOADate()) / 365;
+                currency_pairs ccys = new currency_pairs(Ccys);
+
+                if (st == payoff.c) {
+                    tmp_M = volCurve.fxVolS_c;
+                } else {
+                    tmp_M = volCurve.fxVolS_p;
+                }
+                double Rate = (tmp_M.dfsdd_dfddd - 1) / ((double)delDate.Subtract(spotDate).Days / volCurve.yc_d.day_count) * 100;
+                double RateF = (tmp_M.dfsdf_dfddf - 1) / ((double)delDate.Subtract(spotDate).Days / volCurve.yc_d.day_count) * 100;
+
+                dwei = dwei + "General:" + Environment.NewLine;
+                dwei = dwei + "Ccys:" + Ccys + Environment.NewLine;
+                dwei = dwei + "Dd(0,spot):" + tmp_M.Dd_spot + Environment.NewLine;
+                dwei = dwei + "Dd(0, del):" + tmp_M.Dd_del + Environment.NewLine;
+                dwei = dwei + "Df(0,spot):" + tmp_M.Df_spot + Environment.NewLine;
+                dwei = dwei + "Df(0, del):" + tmp_M.Df_del + Environment.NewLine;
+                dwei = dwei + Environment.NewLine + "For BS Model:" + Environment.NewLine;
+                dwei = dwei + "dt = " + dt + Environment.NewLine;
+                dwei = dwei + "Rd = " + Math.Log(tmp_M.dfsdd_dfddd) / dt + Environment.NewLine + "Rf = " + Math.Log(tmp_M.dfsdf_dfddf) / dt + Environment.NewLine;
+                dwei = dwei + Environment.NewLine + "For Murex e-trad pad:" + Environment.NewLine;
+                dwei = dwei + "Volatility = " + ans[1] * 100 + Environment.NewLine;
+                dwei = dwei + "Spot_used = " + tmp_M.spot + Environment.NewLine;
+                dwei = dwei + "Swap Point = " + (tmp_M.forward_price - tmp_M.spot) / ccys.sp_factor + Environment.NewLine;
+                dwei = dwei + "Forward = " + tmp_M.spot * tmp_M.dfsdd_dfddd / tmp_M.dfsdf_dfddf + Environment.NewLine;
+                dwei = dwei + "Rate = " + Rate + "(" + 1 / tmp_M.dfsdd_dfddd + ")" + Environment.NewLine + "RateF = " + RateF + "(" + 1 / tmp_M.dfsdf_dfddf + ")" + Environment.NewLine;
+
+                dwei = dwei + Environment.NewLine + "Biz Days:" + Environment.NewLine;
+                volCurve.bizDays.TryGetValue(exDate, out tmp);
+                dwei = dwei + tks[0] + ", " + dateformat_convert(tk[0]) + ", " + (double)(tk[0].ToOADate() - today.ToOADate()) + "(" + volCurve.biz_vol_days[0] + ")" + Environment.NewLine;
+                dwei = dwei + tks[1] + ", " + dateformat_convert(tk[1]) + ", " + (double)(tk[1].ToOADate() - today.ToOADate()) + "(" + volCurve.biz_vol_days[1] + ")" + Environment.NewLine;
+                dwei = dwei + "Exp" + ", " + dateformat_convert(exDate) + ", " + (double)(exDate.ToOADate() - today.ToOADate()) + "(" + tmp + ")" + Environment.NewLine;
+                
+                for(int i=0; i<5;i++){
+                    mid_vol[i] = volCurve.volSet[i] + volCurve.v0;
+
+                    if (buysell == BSModel2.buysell.buy) {
+                        vol_ba = "bid";
+                        bid_vol[i] = mid_vol[i] - (tmp_M.volSet[i] + tmp_M.v0);
+                    } else {
+                        vol_ba = "ask";
+                        bid_vol[i] = mid_vol[i] + (tmp_M.volSet[i] + tmp_M.v0);
+                    }
+                }
+
+                dwei = dwei + Environment.NewLine + "Vol Set:" + Environment.NewLine;
+                if (buysell == BSModel2.buysell.buy) {
+                    vol_ba = "bid";
+                } else {
+                    vol_ba = "ask";
+                }
+                dwei = dwei + dateformat_convert(exDate) + ", mid: [" + deltaSet[0] * 100 + "," + (mid_vol[0]) * 100 + "," + deltaSet[1] * 100 + "," + (mid_vol[1]) * 100 + "," + deltaSet[2] * 100 + "," + (mid_vol[2]) * 100 + "," + deltaSet[3] * 100 + "," + (mid_vol[3]) * 100 + "," + deltaSet[4] * 100 + "," + (mid_vol[4]) * 100 + "]" + Environment.NewLine;
+                dwei = dwei + dateformat_convert(exDate) + ", " + vol_ba + ": [" + deltaSet[0] * 100 + "," + (bid_vol[0]) * 100 + "," + deltaSet[1] * 100 + "," + (bid_vol[1]) * 100 + "," + deltaSet[2] * 100 + "," + (bid_vol[2]) * 100 + "," + deltaSet[3] * 100 + "," + (bid_vol[3]) * 100 + "," + deltaSet[4] * 100 + "," + (bid_vol[4]) * 100 + "]" + Environment.NewLine;
+
+                dwei = dwei + Environment.NewLine + "Weight: " + Environment.NewLine;
+                for (int i = 0; i < dkey.Length; i++) {
+                    if (dkey[i] <= tk[1] && dkey[i] >= tk[0]) {
+                        if (i == 0) {
+                            dwei = dwei + dateformat_convert(dkey[i]) + " , " + Math.Round(ditem[i], 2) + Environment.NewLine;
+                        } else {
+                            dwei = dwei + dateformat_convert(dkey[i]) + " , " + Math.Round(ditem[i] - ditem[i - 1], 2) + Environment.NewLine;
+                        }
+                    }
+                }
+            }
+
+            isdo = false;
+            while (!isdo) {
+                try {
+                    open_odbc(ordll_connectionstring);
+                    BeginTransaction();
+                    if (ischeckwei) {
+                        CommandText = "update " + inTableName + " set prem = " + ans[0] + ", delta = " + ans[2] + ", smilevol = " + ans[1] + ", weight = '" + dwei + "' where id = " + id;
+                    } else {
+                        CommandText = "update " + inTableName + " set prem = " + ans[0] + ", delta = " + ans[2] + ", smilevol = " + ans[1] + " where id = " + id;
+                    }
+                    ExecuteNonQuery();
+                    TransactionCommit();
+                    close_odbc();
+                    isdo = true;
+                } catch (Exception ex) {
+                    System.Diagnostics.Debug.WriteLine("Oracel DB: " + ex.Message);
+                    Thread.Sleep(100);
+                    close_odbc();
+                    conn_num++;
+                    if (conn_num > 50) throw new Exception("Cannot connect to DB.");
+                }
+            }
+            Console.WriteLine("Price in %" + NotionalCcy + " is " + ans[0] + "; Delta is " + ans[2] + "; SmileVol is " + ans[1]);
+#if DEBUG
+            if (ischeckwei) {
+                Console.WriteLine(dwei);
+            }
+#endif
+            // Release the memory
+            volCurve = null;
+        }
+        private static void insert_details(int id) {
+            bool isdo = false;
+            int conn_num = 0;
+            string tmp = "", tmp0 = "";
+
+            while (!isdo) {
+                try {
+                    open_odbc(ordll_connectionstring);
+                    BeginTransaction();
+                    CommandText = "DELETE FROM  " + middleware + " WHERE id=" + id + " AND ord>=1000";
+                    ExecuteNonQuery();
+                    tmp0 = "weighted_date0";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',50)";
+                    ExecuteNonQuery();
+                    tmp0 = "weighted_date1";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',51)";
+                    ExecuteNonQuery();
+                    tmp0 = "weighted_date exp";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',52)";
+                    ExecuteNonQuery();
+                    tmp0 = "vol_date0";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',53)";
+                    ExecuteNonQuery();
+                    tmp0 = "vol_date1";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',54)";
+                    ExecuteNonQuery();
+                    tmp0 = "vol_date exp";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',55)";
+                    ExecuteNonQuery();
+                    tmp0 = "vol0";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',56)";
+                    ExecuteNonQuery();
+                    tmp0 = "vol1";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',57)";
+                    ExecuteNonQuery();
+                    tmp0 = "vol2";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',58)";
+                    ExecuteNonQuery();
+                    tmp0 = "vol3";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',59)";
+                    ExecuteNonQuery();
+                    tmp0 = "vol4";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',60)";
+                    ExecuteNonQuery();
+                    tmp0 = "spot";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',62)";
+                    ExecuteNonQuery();
+                    tmp0 = "forward";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',63)";
+                    ExecuteNonQuery();
+                    tmp0 = "strike";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',64)";
+                    ExecuteNonQuery();
+                    tmp0 = "rd";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',65)";
+                    ExecuteNonQuery();
+                    tmp0 = "rf";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name ,bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',66)";
+                    ExecuteNonQuery();
+                    tmp0 = "prem_percent";
+                    misc.log.TryGetValue(tmp0, out tmp);
+                    CommandText = "INSERT INTO  bs_vol_mw_par03 (id,name, bid,idx,ord) VALUES (" + id + ",'" + tmp0 + "'," + tmp + ",'OUT',67)";
+                    ExecuteNonQuery();
+                    TransactionCommit();
+                    close_odbc();
+                    isdo = true;
+                } catch (Exception ex) {
+                    System.Diagnostics.Debug.WriteLine("Oracel DB: " + ex.Message);
+                    Thread.Sleep(100);
+                    close_odbc();
+                    conn_num++;
+                    if (conn_num > 50) throw new Exception("Cannot connect to DB.");
+                }
+            }
+        }
+        private static void get_dcd_greeks(int id) {
+            double amount = 0.0, dir, time_int;
+            int conn_num = 0;
+            string interpolateMode = "Spreads"; // Spread ro Volatility
+            string extrapolateMode = "Linear"; // Flat, Linear(Murex default) or Extrapolate            
+            bool isdo = false;
+            double temp;
+            double[] ans;
+            DateTime spotDate = new DateTime();
+
+            while (!isdo) {
+                try {
+                    open_odbc(ordll_connectionstring);
+                    CommandText = "select id, ccys, nccy, spot, spotrd, spotrf, delrd, delrf, today, spotdate, exdate, deldate, strike, stgy, amount,spot_m  from " + schema + "." + inTableName + " where id=" + id;
+                    ExecuteReader(ref reader);
+
+                    Ccys = Convert.ToString(reader[1]);
+                    NotionalCcy = Convert.ToString(reader[2]);
+                    temp = Convert.ToDouble(reader[3]);
+                    today = Convert.ToDateTime(reader[8]);
+                    spotDate = Convert.ToDateTime(reader[9]);
+                    exDate = Convert.ToDateTime(reader[10]);
+                    delDate = Convert.ToDateTime(reader[11]);
+                    strike = Convert.ToDouble(reader[12]);
+                    st = strategy.string_to_payoff(Convert.ToString(reader[13]));
+                    amount = Convert.ToDouble(reader[14]);
+                    spot_m = Convert.ToDouble(reader[15]);
+                    dir = Convert.ToDouble(reader[4]);
+                    time_int = Convert.ToDouble(reader[5]);
+
+                    if (dir > 0) {
+                        buysell = BSModel2.buysell.buy;
+                    } else {
+                        buysell = BSModel2.buysell.sell;
+                    }
+                    if (time_int > 0) {
+                        time_interpolation = true;
+                    } else {
+                        time_interpolation = false;
+                    }
+
+                    if (temp > spot_m) {
+                        spot[1] = temp;
+                        spot[0] = spot_m * 2 - temp;
+                    } else {
+                        spot[0] = temp;
+                        spot[1] = spot_m * 2 - temp;
+                    }
+                    if (!Ccys.Contains("USD")) query_mkt_c(id);
+                    else query_mkt(id);
+
+                    close_odbc();
+
+                    isdo = true;
+                } catch (Exception ex) {
+                    System.Diagnostics.Debug.WriteLine("Oracel DB: " + ex.Message);
+                    Thread.Sleep(100);
+                    close_odbc();
+                    conn_num++;
+                    if (conn_num > 50) throw new Exception("Cannot connect to DB.");
+                }
+            }
+
+            volCurve.init_market(today, depo, tk_usddepo, sp, tk_sp, vol, spot, deltaSet, Ccys, time_interpolation, weight, "Others", da.ToArray(), wei.ToArray(), ref interpolateMode, ref extrapolateMode, MX_TN_rule, tk.ToArray());
+
+            //===================
+            // This is for next generation
+            //volCurve.init_market(today, depo, tk_usddepo_tenor, tk_usddepo, sp, tk_sp_tenor, tk_sp, vol, spot, deltaSet, Ccys, true, weight, tk.ToArray(), "Others", da.ToArray(), wei.ToArray(), ref interpolateMode, ref extrapolateMode);
+            //===================
+
+            ans = volCurve.quotegreeksbydate(buysell, st, strike, amount, NotionalCcy, exDate, delDate, spotDate);
+            isdo = false;
+            while (!isdo) {
+                try {
+                    open_odbc(ordll_connectionstring);
+                    BeginTransaction();
+                    CommandText = "update " + inTableName + " set prem = " + ans[0] + ", delta = " + ans[1] + ",gamma = " + ans[2] + ",vega = " + ans[3] + ", vanna = " + ans[4] + ",smilevol = " + ans[5] + " where id = " + id;
+                    ExecuteNonQuery();
+                    TransactionCommit();
+                    close_odbc();
+                    isdo = true;
+                } catch (Exception ex) {
+                    System.Diagnostics.Debug.WriteLine("Oracel DB: " + ex.Message);
+                    Thread.Sleep(100);
+                    close_odbc();
+                    conn_num++;
+                    if (conn_num > 50) throw new Exception("Cannot connect to DB.");
+                }
+            }
+            Console.WriteLine("Price in %" + NotionalCcy + " is " + ans[0] + "; Delta is " + ans[2] + "; SmileVol is " + ans[1]);
+            // Release the memory
+            volCurve = null;
+        }
+        private static void getvol_byprice(int id) {
+            double amount = 0.0, dir, time_int;
+            int conn_num = 0;
+            string interpolateMode = "Absolute"; // Spread ro Volatility
+            string extrapolateMode = "Linear"; // Flat, Linear(Murex default) or Extrapolate            
+            bool isdo = false;
+            double temp;
+            double[] ans;
+            DateTime spotDate = new DateTime();
+            double prem = 0.0;
+
+            while (!isdo) {
+                try {
+                    open_odbc(ordll_connectionstring);
+                    CommandText = "select id, ccys, nccy, spot, spotrd, spotrf, delrd, delrf, today, spotdate, exdate, deldate, strike, stgy, amount,spot_m,prem  from " + schema + "." + inTableName + " where id=" + id;
+                    ExecuteReader(ref reader);
+
+                    Ccys = Convert.ToString(reader[1]);
+                    NotionalCcy = Convert.ToString(reader[2]);
+                    temp = Convert.ToDouble(reader[3]);
+                    today = Convert.ToDateTime(reader[8]);
+                    spotDate = Convert.ToDateTime(reader[9]);
+                    exDate = Convert.ToDateTime(reader[10]);
+                    delDate = Convert.ToDateTime(reader[11]);
+                    strike = Convert.ToDouble(reader[12]);
+                    st = strategy.string_to_payoff(Convert.ToString(reader[13]));
+                    amount = Convert.ToDouble(reader[14]);
+                    spot_m = Convert.ToDouble(reader[15]);
+                    prem = Convert.ToDouble(reader[16]);
+                    dir = Convert.ToDouble(reader[4]);
+                    time_int = Convert.ToDouble(reader[5]);
+
+                    if (dir > 0) {
+                        buysell = BSModel2.buysell.buy;
+                    } else {
+                        buysell = BSModel2.buysell.sell;
+                    }
+                    if (time_int > 0) {
+                        time_interpolation = true;
+                    } else {
+                        time_interpolation = false;
+                    }
+                    if (temp > spot_m) {
+                        spot[1] = temp;
+                        spot[0] = spot_m * 2 - temp;
+                    } else {
+                        spot[0] = temp;
+                        spot[1] = spot_m * 2 - temp;
+                    }
+                    if (!Ccys.Contains("USD")) query_mkt_c(id);
+                    else query_mkt(id);
+                    close_odbc();
+                    isdo = true;
+                } catch (Exception ex) {
+                    System.Diagnostics.Debug.WriteLine("Oracel DB: " + ex.Message);
+                    Thread.Sleep(100);
+                    close_odbc();
+                    conn_num++;
+                    if (conn_num > 50) throw new Exception("Cannot connect to DB.");
+                }
+            }
+
+            volCurve.init_market(today, depo, tk_usddepo, sp, tk_sp, vol, spot, deltaSet, Ccys, time_interpolation, weight, "Others", da.ToArray(), wei.ToArray(), ref interpolateMode, ref extrapolateMode, MX_TN_rule, tk.ToArray());
+
+            ans = volCurve.quotevolbyprice(prem, buysell, st, strike, amount, NotionalCcy, exDate, delDate, spotDate);
+            isdo = false;
+            while (!isdo) {
+                try {
+                    open_odbc(ordll_connectionstring);
+                    BeginTransaction();
+                    CommandText = "update " + inTableName + " set smilevol = " + ans[0] + " where id = " + id;
+                    ExecuteNonQuery();
+                    TransactionCommit();
+                    close_odbc();
+                    isdo = true;
+                } catch (Exception ex) {
+                    System.Diagnostics.Debug.WriteLine("Oracel DB: " + ex.Message);
+                    Thread.Sleep(100);
+                    close_odbc();
+                    conn_num++;
+                    if (conn_num > 50) throw new Exception("Cannot connect to DB.");
+                }
+            }
+            Console.WriteLine("Spot_m used  is " + ans[1] + ";  SmileVol is " + ans[0]);
+            // Release the memory
+            volCurve = null;
+        }
+        #region Main function
+        /// <summary>
+        /// Main Function  
+        /// <remarks>
+        /// input example:
+        /// BlackScholesModel.exe id,connection_name, inTableName,  middleware_table, Oracle connectionstring, work_item
+        /// BS_MODEL_PAR 
+        /// BS_VOL_MW_PAR
+        /// </remarks>
+        /// </summary>
+        /// <param name="args"></param>
+        public static void Main(string[] args) {
+            int id;
+#if DEBUG
+            //Console.ReadKey();
+#endif
+            id = Convert.ToInt32(args[0]);
+            inTableName = Convert.ToString(args[2]);
+            middleware = Convert.ToString(args[3]);
+            schema = args[4];
+            ordll_connectionstring = String.Format("DSN={0}; Uid={1}; Pwd={2};", Convert.ToString(args[1]), Convert.ToString(args[5]), Convert.ToString(args[6]));
+
+            if (args.Length == 7) {
+                get_market_quote(id);
+                return;
+            }
+
+            switch (Convert.ToInt32(args[7])) {
+                case 0:
+                    //pricing PV and vol given market quote and strike
+                    get_market_quote(id);
+                    break;
+                case 1:
+                    // getting vol given market quote, premium, and strike
+                    getvol_byprice(id);
+                    break;
+
+                case 2:
+                    // getting dcd greeks
+                    get_dcd_greeks(id);
+                    break;
+
+                case 3:
+                    //pricing PV and vol given market quote and strike and deliver log details
+                    misc.islog_level = true;
+                    misc.log = new Dictionary<string, string>();
+                    BSModel2_log o = new BSModel2_log();
+                    volCurve = null;
+                    volCurve = (BSModel2)o;
+                    get_market_quote(id);
+                    insert_details(id);
+                    break;
+
+                default:
+                    Console.WriteLine("why here ? check work_item");
+                    break;
+            }
+        }
+        #endregion
+        private static string dateformat(string d) {
+            DateTime da = Convert.ToDateTime(d);
+            return da.Year + "/" + da.Month + "/" + da.Day;
+        }
+        /// <summary>
+        /// YYY/MM/DD
+        /// </summary>
+        /// <param name="d"></param>
+        /// <returns></returns>
+        private static string dateformat_convert(DateTime d) {
+            string m = d.Month < 10 ? "0" + Convert.ToString(d.Month) : Convert.ToString(d.Month);
+            string dd = d.Day < 10 ? "0" + Convert.ToString(d.Day) : Convert.ToString(d.Day);
+            return d.Year + "-" + m + "-" + dd;
+        }
+    }
+}
