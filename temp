@@ -1,1 +1,21 @@
 
+#Hadoop Variables edited by JAY 20171023
+120 export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+121 export HADOOP_HOME=/usr/local/hadoop
+122 export PATH=$PATH:$HADOOP_HOME/bin
+123 export PATH=$PATH:$HADOOP_HOME/sbin
+124 export HADOOP_MAPPED_HOME=$HADOOP_HOME
+125 export HADOOP_COMMON_HOME=$HADOOP_HOME
+126 export HADOOP_HDFS_HOME=$HADOOP_HOME
+127 export YARN_HOME=$HADOOP_HOME
+128 export HADOOP_COMMON_LIB_NATIVE_DIR=$HADOOP_HOME/lib/native
+129 export HADOOP_OPTS="-Djava.library.path=$HADOOP_HOME/lib"
+130 export JAVA_LIBRARY_PATH=$HADOOP_HOME/lib/native:$JAVA_LIBRARY_PATH
+131 #Hadoop Variables
+132 
+133 # edited by JAY 20171023 for SPARK
+134 export SPARK_HOME=/usr/local/spark
+135 export PATH=$PATH:$SPARK_HOME/bin
+136 
+137 alias python=python3
+138 alias pip=pip3
